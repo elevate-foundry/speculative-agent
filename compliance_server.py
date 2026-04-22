@@ -14,6 +14,19 @@ import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
+# Load .env before importing anything that reads env vars (config, providers)
+_env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip())
+
+# Use performance budget so cloud models (OpenAI, Anthropic, Google) are included
+os.environ.setdefault("AGENT_BUDGET", "performance")
+
 sys.path.insert(0, os.path.dirname(__file__))
 from compliance import evaluate, infer_context, DataContext, AUDIT_LOG_PATH
 
@@ -323,10 +336,29 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    def _send_sse(self, event: str, data: str):
+        msg = f"event: {event}\ndata: {data}\n\n"
+        self.wfile.write(msg.encode())
+        self.wfile.flush()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path in ("/", ""):
             self._send_html(HTML)
+        elif parsed.path == "/race":
+            qs = parse_qs(parsed.query)
+            task = qs.get("task", [""])[0].strip()
+            if not task:
+                self._send_html(RACE_HTML)
+                return
+            # SSE stream
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            _run_race_sse(task, self._send_sse)
         elif parsed.path == "/audit":
             qs = parse_qs(parsed.query)
             n = int(qs.get("n", ["50"])[0])
@@ -411,6 +443,344 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(result)
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
+
+
+RACE_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Speculative Race — Live CoT</title>
+<style>
+  :root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#e6edf3;
+        --muted:#8b949e;--green:#3fb950;--orange:#d29922;--red:#f85149;
+        --blue:#58a6ff;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:"SF Mono",ui-monospace,monospace;
+       font-size:12px;line-height:1.55;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  #header{padding:.6rem 1rem;border-bottom:1px solid var(--border);
+          display:flex;align-items:center;gap:1rem;flex-shrink:0}
+  #header h1{font-size:.9rem;color:var(--blue);letter-spacing:.06em}
+  #task-input{flex:1;background:var(--surface);border:1px solid var(--border);
+              color:var(--text);padding:.35rem .6rem;border-radius:4px;font-family:inherit;font-size:12px}
+  #task-input:focus{outline:none;border-color:var(--blue)}
+  #go-btn{background:var(--blue);color:#0d1117;border:none;padding:.35rem 1rem;
+          border-radius:4px;font-family:inherit;font-size:12px;cursor:pointer;font-weight:700;white-space:nowrap}
+  #go-btn:disabled{opacity:.4;cursor:default}
+  #lagrangian-bar{padding:.35rem 1rem;background:#0a0e14;border-bottom:1px solid var(--border);
+                  font-size:.75rem;color:var(--muted);display:flex;gap:1.5rem;flex-shrink:0;flex-wrap:wrap}
+  .l-chip{display:inline-flex;align-items:center;gap:.3rem}
+  .l-score{font-weight:700;font-variant-numeric:tabular-nums}
+  #arena{display:flex;flex:1;overflow:hidden;gap:0}
+  .col-wrap{display:flex;flex-direction:column;flex:1;min-width:220px;
+            border-right:1px solid var(--border);overflow:hidden}
+  .col-wrap:last-child{border-right:none}
+  .col-header{padding:.4rem .6rem;background:#0a0e14;border-bottom:1px solid var(--border);
+              display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+  .col-name{font-weight:700;font-size:.78rem;letter-spacing:.04em}
+  .col-meta{font-size:.7rem;color:var(--muted)}
+  .col-body{flex:1;overflow-y:auto;padding:.5rem .6rem;white-space:pre-wrap;word-break:break-word;font-size:11.5px}
+  .token{animation:fadein .08s ease}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  .verdict-PERMIT{color:var(--green)}
+  .verdict-CONDITIONAL{color:var(--orange)}
+  .verdict-BLOCK{color:var(--red)}
+  .badge{display:inline-block;padding:1px 5px;border-radius:3px;font-size:.7rem;font-weight:700}
+  .badge-PERMIT{background:#1a3d20;color:var(--green)}
+  .badge-CONDITIONAL{background:#3d2c0a;color:var(--orange)}
+  .badge-BLOCK{background:#3d0f0a;color:var(--red)}
+  .badge-WINNER{background:#1a2a3d;color:var(--blue);margin-left:.4rem}
+  .done-overlay{position:sticky;bottom:0;background:#0a0e14;border-top:1px solid var(--border);
+                padding:.25rem .6rem;font-size:.7rem;display:flex;gap:.8rem;color:var(--muted)}
+  #status-bar{padding:.3rem 1rem;background:#0a0e14;border-top:1px solid var(--border);
+              font-size:.72rem;color:var(--muted);flex-shrink:0}
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>⬡ Speculative Race</h1>
+  <input id="task-input" type="text" placeholder="Enter task for all models to race on…"
+         value="What is the tropical semiring? Explain in 3 sentences then output a noop action.">
+  <button id="go-btn" onclick="startRace()">Race ▶</button>
+</div>
+<div id="lagrangian-bar">
+  <span style="color:var(--muted)">ℒ distribution:</span>
+  <span class="l-chip">L0 <span class="l-score" id="lc-L0" style="color:var(--green)">—</span></span>
+  <span class="l-chip">L1 <span class="l-score" id="lc-L1" style="color:var(--orange)">—</span></span>
+  <span class="l-chip">L2 <span class="l-score" id="lc-L2" style="color:var(--red)">—</span></span>
+  <span class="l-chip">L3 <span class="l-score" id="lc-L3" style="color:#f85149;font-weight:900">—</span></span>
+  <span id="race-status" style="margin-left:auto"></span>
+</div>
+<div id="arena"></div>
+<div id="status-bar">Ready — enter a task and click Race ▶</div>
+
+<script>
+const COLORS = ['#58a6ff','#3fb950','#bc8cff','#d29922','#f78166','#39d353','#ffa657','#79c0ff'];
+let evtSource = null;
+let cols = {};
+let startTs = null;
+let winnerName = null;
+let lCounts = {L0:0,L1:0,L2:0,L3:0};
+
+function lagrangianClass(l) {
+  if (l === 0) return 'L0';
+  if (l <= 0.5) return 'L1';
+  if (l < 2.0)  return 'L2';
+  return 'L3';
+}
+
+function startRace() {
+  const task = document.getElementById('task-input').value.trim();
+  if (!task) return;
+  if (evtSource) { evtSource.close(); evtSource = null; }
+
+  // Reset state
+  document.getElementById('arena').innerHTML = '';
+  cols = {}; lCounts = {L0:0,L1:0,L2:0,L3:0}; winnerName = null; startTs = Date.now();
+  ['L0','L1','L2','L3'].forEach(c => document.getElementById('lc-'+c).textContent = '0');
+  document.getElementById('go-btn').disabled = true;
+  document.getElementById('race-status').textContent = '⟳ racing…';
+  document.getElementById('status-bar').textContent = 'Race started — waiting for models…';
+
+  const url = '/race?task=' + encodeURIComponent(task);
+  evtSource = new EventSource(url);
+
+  evtSource.addEventListener('init', e => {
+    const d = JSON.parse(e.data);
+    d.models.forEach((name, i) => {
+      const color = COLORS[i % COLORS.length];
+      cols[name] = createColumn(name, color);
+    });
+    document.getElementById('status-bar').textContent =
+      `Racing ${d.models.length} models — task: "${task.slice(0,80)}"`;
+  });
+
+  evtSource.addEventListener('token', e => {
+    const d = JSON.parse(e.data);
+    if (!cols[d.model]) return;
+    const body = cols[d.model].body;
+    const span = document.createElement('span');
+    span.className = 'token';
+    span.textContent = d.token;
+    body.appendChild(span);
+    body.scrollTop = body.scrollHeight;
+    cols[d.model].tokens++;
+    cols[d.model].meta.textContent = `${cols[d.model].tokens} tok`;
+  });
+
+  evtSource.addEventListener('done', e => {
+    const d = JSON.parse(e.data);
+    if (!cols[d.model]) return;
+    const elapsed = ((Date.now() - startTs)/1000).toFixed(2);
+    const c = cols[d.model];
+    const cls = lagrangianClass(d.lagrangian || 0);
+    lCounts[cls]++;
+    document.getElementById('lc-'+cls).textContent = lCounts[cls];
+
+    // Score badge
+    const badge = document.createElement('div');
+    badge.className = 'done-overlay';
+    const verdict = d.lagrangian === 0 ? 'PERMIT' : d.lagrangian <= 0.5 ? 'CONDITIONAL' : 'BLOCK';
+    badge.innerHTML =
+      `<span>ℒ=${(d.lagrangian||0).toFixed(2)}</span>` +
+      `<span class="badge badge-${verdict}">${verdict}</span>` +
+      `<span>${d.elapsed_ms ? (d.elapsed_ms/1000).toFixed(2)+'s' : elapsed+'s'}</span>` +
+      `<span>score=${d.score ? d.score.toFixed(2) : '?'}</span>` +
+      (d.winner ? `<span class="badge badge-WINNER">⚡ WINNER</span>` : '');
+    c.wrap.appendChild(badge);
+    c.meta.textContent = `${c.tokens} tok · done`;
+    if (d.winner) {
+      winnerName = d.model;
+      c.header.style.background = '#0d2137';
+      document.getElementById('race-status').textContent = `⚡ Winner: ${d.model.split('/').pop().slice(0,20)}`;
+    }
+  });
+
+  evtSource.addEventListener('end', e => {
+    const d = JSON.parse(e.data);
+    document.getElementById('go-btn').disabled = false;
+    document.getElementById('status-bar').textContent =
+      `Race complete — winner: ${(d.winner||'?').split('/').pop()} ` +
+      `· ${d.model_count} models · ${((Date.now()-startTs)/1000).toFixed(1)}s`;
+    if (!d.winner) document.getElementById('race-status').textContent = 'done';
+    evtSource.close(); evtSource = null;
+  });
+
+  evtSource.onerror = () => {
+    document.getElementById('go-btn').disabled = false;
+    document.getElementById('race-status').textContent = 'error';
+    document.getElementById('status-bar').textContent = 'SSE connection error — is the server running?';
+    if (evtSource) { evtSource.close(); evtSource = null; }
+  };
+}
+
+function createColumn(name, color) {
+  const arena = document.getElementById('arena');
+  const wrap = document.createElement('div');
+  wrap.className = 'col-wrap';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'col-header';
+  const short = name.split('/').pop().split(':')[0].slice(0,22);
+  const nameEl = document.createElement('span');
+  nameEl.className = 'col-name';
+  nameEl.style.color = color;
+  nameEl.textContent = short;
+  const meta = document.createElement('span');
+  meta.className = 'col-meta';
+  meta.textContent = '0 tok';
+  hdr.appendChild(nameEl);
+  hdr.appendChild(meta);
+
+  const body = document.createElement('div');
+  body.className = 'col-body';
+  body.style.color = color;
+
+  wrap.appendChild(hdr);
+  wrap.appendChild(body);
+  arena.appendChild(wrap);
+  return { wrap, header: hdr, body, meta, tokens: 0 };
+}
+
+// Allow Enter key to start race
+document.getElementById('task-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startRace();
+});
+</script>
+</body>
+</html>"""
+
+
+def _run_race_sse(task: str, send_sse) -> None:
+    """
+    Discover models, run supervise_race, and stream tokens as SSE events.
+    Runs synchronously (blocks the handler thread) since HTTPServer is
+    single-threaded per connection anyway.
+    """
+    import asyncio
+    import threading
+
+    import time
+
+    try:
+        from config import discover_and_warmup, OLLAMA_BASE
+        from supervisor import score_reasoning, ModelStream, stream_model, _assign_colors
+        from executor import parse_action_from_text
+        from agent import SYSTEM_PROMPT
+    except Exception as e:
+        send_sse("end", json.dumps({"error": str(e), "winner": None, "model_count": 0}))
+        return
+
+    loop = asyncio.new_event_loop()
+    race_done = threading.Event()
+    result_holder = {}
+    streams_holder = {}   # model_name -> ModelStream, populated async
+    emitted = {}          # model_name -> int tokens already forwarded
+
+    def run_loop():
+        async def _race():
+            # Discover models inside the loop (discover_and_warmup is async)
+            models, hw = await discover_and_warmup(verbose=False)
+            if not models:
+                result_holder["error"] = "no models available"
+                return
+
+            model_names = [m.name for m in models]
+            result_holder["model_names"] = model_names
+            send_sse("init", json.dumps({"models": model_names}))
+
+            _assign_colors(model_names)
+            cancel_event = asyncio.Event()
+            streams = {m.name: ModelStream(model_name=m.name, provider=m.provider) for m in models}
+            streams_holder.update(streams)
+            emitted.update({n: 0 for n in model_names})
+
+            tasks = {
+                m.name: asyncio.create_task(
+                    stream_model(m.name, task, streams[m.name], cancel_event,
+                                 ollama_base=OLLAMA_BASE,
+                                 system_prompt=SYSTEM_PROMPT,
+                                 live_output=False,
+                                 provider_config=getattr(m, "provider_config", None),
+                                 max_tokens=2048))
+                for m in models
+            }
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+            best = max(streams.values(),
+                       key=lambda s: score_reasoning(s.text) if s.text else 0.0,
+                       default=None)
+            result_holder["streams"] = list(streams.values())
+            if best and best.text:
+                action = parse_action_from_text(best.text, best.model_name)
+                result_holder["winner"] = action
+
+        loop.run_until_complete(_race())
+        race_done.set()
+
+    t = threading.Thread(target=run_loop, daemon=True)
+    t.start()
+
+    # Poll streams mid-race and forward new tokens live
+    while not race_done.is_set():
+        time.sleep(0.04)
+        for name, s in streams_holder.items():
+            n = emitted.get(name, 0)
+            new_tokens = s.tokens[n:]
+            for tok in new_tokens:
+                try:
+                    send_sse("token", json.dumps({"model": name, "token": tok}))
+                except Exception:
+                    pass
+            emitted[name] = n + len(new_tokens)
+
+    # Drain any remaining tokens after race finished
+    for name, s in streams_holder.items():
+        n = emitted.get(name, 0)
+        for tok in s.tokens[n:]:
+            try:
+                send_sse("token", json.dumps({"model": name, "token": tok}))
+            except Exception:
+                pass
+
+    streams = result_holder.get("streams", [])
+    winner_action = result_holder.get("winner")
+    winner_name = winner_action.model_source if winner_action else None
+
+    for s in streams:
+        from supervisor import score_reasoning
+        score = score_reasoning(s.text) if s.text else 0.0
+        lagrangian = 0.0
+        try:
+            from compliance import infer_context
+            from executor import parse_action_from_text
+            action = parse_action_from_text(s.text, s.model_name) if s.text else None
+            if action and action.payload:
+                path = action.payload.get("command", action.payload.get("path", ""))
+                ctx = infer_context(path, task)
+                decision = evaluate(action.action_type, action.payload, ctx)
+                lagrangian = decision.lagrangian_value
+        except Exception:
+            pass
+        try:
+            send_sse("done", json.dumps({
+                "model": s.model_name,
+                "score": score,
+                "elapsed_ms": s.elapsed_ms,
+                "lagrangian": lagrangian,
+                "winner": s.model_name == winner_name,
+                "error": s.error,
+            }))
+        except Exception:
+            pass
+
+    try:
+        send_sse("end", json.dumps({
+            "winner": winner_name,
+            "model_count": len(streams),
+        }))
+    except Exception:
+        pass
 
 
 def _read_audit_tail(n: int) -> list:

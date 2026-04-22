@@ -195,12 +195,20 @@ def models_for_tier(tier: str) -> list[tuple[ProviderConfig, str]]:
         tier = "free"
     max_idx = tier_order.index(tier)
 
+    MAX_PER_PROVIDER = 2  # avoid hammering rate limits with 9 Claude models simultaneously
+
     results = []
     for provider in active_providers():
-        for t_idx, t_name in enumerate(tier_order[1:], 1):  # skip 'free'
-            if t_idx <= max_idx:
-                for model_id in provider.models.get(t_name, []):
-                    results.append((provider, model_id))
+        added = 0
+        # Prefer highest tier first, then fall down
+        for t_name in reversed(tier_order[1:max_idx + 1]):
+            for model_id in provider.models.get(t_name, []):
+                if added >= MAX_PER_PROVIDER:
+                    break
+                results.append((provider, model_id))
+                added += 1
+            if added >= MAX_PER_PROVIDER:
+                break
     return results
 
 

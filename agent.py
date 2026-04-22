@@ -164,9 +164,9 @@ class Agent:
             return self.models
         if tier not in self._or_cache:
             upgraded_or = await list_openrouter_models(tier=tier)
-            # Merge: keep local models, replace OR pool with upgraded set
-            local = [m for m in self.models if m.provider == "ollama"]
-            self._or_cache[tier] = local + upgraded_or
+            # Keep local + direct provider models; replace only the OR free pool
+            non_or = [m for m in self.models if m.provider != "openrouter"]
+            self._or_cache[tier] = non_or + upgraded_or
         return self._or_cache[tier]
 
     async def run_task(self, task: str, max_steps: int = 20, max_retries_per_step: int = 2) -> Optional[ActionResult]:

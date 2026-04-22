@@ -101,9 +101,12 @@ class Agent:
             parts.append("=== Previous steps ===")
             for i, h in enumerate(self.history[-3:], 1):  # last 3 steps for context
                 parts.append(f"Step {i}: {h['task']}")
-                if h.get("result"):
+                if h.get("action_type") == "user_feedback":
+                    parts.append(f"  *** HUMAN INSTRUCTION: {h['description']} ***")
+                    parts.append(f"  -> You MUST follow this instruction exactly in your next action.")
+                elif h.get("result"):
                     parts.append(f"  Result: {h['result'][:300]}")
-                if not h.get("success") and h.get("error"):
+                if not h.get("success") and h.get("error") and h.get("action_type") != "user_feedback":
                     parts.append(f"  ERROR: {h['error']}")
                     parts.append(f"  -> You must fix this error and try a different approach.")
         if screen_ctx:
@@ -178,6 +181,22 @@ class Agent:
 
             result = execute(action)
             last_result = result
+
+            # User typed freeform feedback instead of y/n — inject and re-race
+            if result.user_feedback:
+                print(f"\n[agent] Injecting your feedback into next race: {result.user_feedback!r}")
+                self.history.append({
+                    "task": task,
+                    "step": step,
+                    "action_type": "user_feedback",
+                    "model": "human",
+                    "description": result.user_feedback,
+                    "success": True,
+                    "result": f"USER INSTRUCTION: {result.user_feedback}",
+                    "error": None,
+                })
+                consecutive_failures = 0
+                continue
 
             entry = {
                 "task": task,

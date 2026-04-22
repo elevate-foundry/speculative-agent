@@ -35,6 +35,7 @@ class ActionResult:
     success: bool
     output: str
     error: Optional[str] = None
+    user_feedback: Optional[str] = None  # freeform instruction from approval gate
 
 
 def parse_action_from_text(text: str, model_name: str) -> Optional[Action]:
@@ -69,8 +70,14 @@ def parse_action_from_text(text: str, model_name: str) -> Optional[Action]:
         return None
 
 
-def _prompt_approval(action: Action) -> bool:
-    """Interactive terminal approval gate."""
+def _prompt_approval(action: Action) -> "bool | str":
+    """
+    Interactive terminal approval gate.
+    Returns:
+      True        — approved, execute
+      False       — rejected, skip
+      str         — freeform feedback to feed back to models before retrying
+    """
     border = "─" * 60
     print(f"\n{'═'*60}")
     print(f"  ACTION PROPOSAL from [{action.model_source}]")
@@ -82,23 +89,30 @@ def _prompt_approval(action: Action) -> bool:
     for line in payload_str.splitlines():
         print(f"  {line}")
     print(f"{'═'*60}")
+    print("  y = approve  |  n = reject  |  q = quit  |  anything else = feedback to models")
     while True:
-        ans = input("  Approve? [y/n/d(iff)/q(uit)] → ").strip().lower()
-        if ans in ("y", "yes"):
+        ans = input("  → ").strip()
+        low = ans.lower()
+        if low in ("y", "yes"):
             return True
-        if ans in ("n", "no"):
+        if low in ("n", "no"):
             return False
-        if ans in ("q", "quit"):
+        if low in ("q", "quit"):
             print("Exiting.")
             sys.exit(0)
-        print("  Please enter y, n, or q.")
+        if ans:
+            return ans  # freeform feedback
+        print("  Please enter y, n, q, or any instruction for the models.")
 
 
 def execute(action: Action, auto_approve: bool = False) -> ActionResult:
     if action.action_type in ALWAYS_CONFIRM and not auto_approve:
         approved = _prompt_approval(action)
-        if not approved:
+        if approved is False:
             return ActionResult(success=False, output="", error="User rejected action.")
+        if isinstance(approved, str):
+            return ActionResult(success=False, output="", error="User provided feedback.",
+                                user_feedback=approved)
 
     try:
         if action.action_type == "noop":

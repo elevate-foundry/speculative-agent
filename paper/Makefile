@@ -21,7 +21,7 @@ html: $(TEX) $(BIB) style.css header.html
 	  --bibliography=$(BIB) \
 	  --citeproc \
 	  --standalone \
-	  --mathjax \
+	  --mathjax=https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js \
 	  --toc \
 	  --css=style.css \
 	  --include-before-body=header.html \

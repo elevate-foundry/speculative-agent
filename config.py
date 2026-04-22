@@ -28,19 +28,18 @@ OPENROUTER_MAX_MODELS = int(os.environ.get("OPENROUTER_MAX_MODELS", "5"))
 # performance: adds top-tier models with vision (~$0.005/tok)
 BUDGET_TIER = os.environ.get("AGENT_BUDGET", "free").lower()
 
-# Curated paid model lists per tier (OpenRouter IDs)
-_STANDARD_MODELS = [
-    "openai/gpt-4o-mini",
-    "anthropic/claude-haiku-20240307",
-    "google/gemini-flash-1.5",
-    "mistralai/mistral-small-3.1-24b-instruct",
+# Paid OpenRouter model IDs — only used when OPENROUTER_API_KEY has a balance.
+# Models from OpenAI/Anthropic/Google/xAI are better routed via direct keys
+# (providers.py) to avoid 402 Payment Required from OR with no balance.
+# These OR tier lists are intentionally minimal; direct keys take priority.
+_STANDARD_MODELS: list[str] = [
+    # Add OR-specific models here if you have OR balance, e.g.:
+    # "mistralai/mistral-small-3.1-24b-instruct",
 ]
 
-_PERFORMANCE_MODELS = [
-    "openai/gpt-4o",
-    "anthropic/claude-sonnet-4",
-    "google/gemini-2.5-pro-preview",
-    "openai/o3",
+_PERFORMANCE_MODELS: list[str] = [
+    # Add OR-specific models here if you have OR balance, e.g.:
+    # "perplexity/sonar-pro",
 ]
 
 # Keywords that signal the task needs a higher tier

@@ -91,18 +91,35 @@ def parse_action_from_text(text: str, model_name: str) -> Optional[Action]:
         ```json
         {"action_type": "bash", "description": "...", "payload": {...}, "confidence": 0.9}
         ```
+    Robust to: nested objects in payload, multiple code blocks, trailing text.
     """
     import re
-    # Try fenced JSON block first
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if not match:
-        # Try bare JSON object anywhere in the text
-        match = re.search(r"(\{[^{}]*\"action_type\"[^{}]*\})", text, re.DOTALL)
-    if not match:
-        return None
-    try:
-        obj = json.loads(match.group(1))
-        atype = obj.get("action_type", "noop")
+
+    def _try_parse(s: str) -> Optional[Action]:
+        s = s.strip()
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            # Attempt to repair by finding the outermost balanced brace span
+            start = s.find("{")
+            if start == -1:
+                return None
+            depth = 0
+            end = start
+            for i, ch in enumerate(s[start:], start):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            try:
+                obj = json.loads(s[start:end + 1])
+            except json.JSONDecodeError:
+                return None
+
+        atype = obj.get("action_type", "")
         if atype not in ALLOWED_ACTION_TYPES:
             return None
         return Action(
@@ -112,8 +129,20 @@ def parse_action_from_text(text: str, model_name: str) -> Optional[Action]:
             model_source=model_name,
             confidence=float(obj.get("confidence", 0.5)),
         )
-    except (json.JSONDecodeError, ValueError):
-        return None
+
+    # 1. Fenced ```json ... ``` blocks (try all of them, take first valid)
+    for block in re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL):
+        result = _try_parse(block)
+        if result:
+            return result
+
+    # 2. Bare JSON object containing "action_type" (handles mistral / no-fence models)
+    for block in re.findall(r"(\{(?:[^{}]|\{[^{}]*\})*\"action_type\"(?:[^{}]|\{[^{}]*\})*\})", text, re.DOTALL):
+        result = _try_parse(block)
+        if result:
+            return result
+
+    return None
 
 
 def _prompt_approval(action: Action) -> "bool | str":

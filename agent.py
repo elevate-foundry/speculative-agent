@@ -103,7 +103,15 @@ class Agent:
 
     def _build_prompt(self, task: str, context: Optional[str] = None,
                       screen_ctx: Optional[str] = None) -> str:
-        parts = []
+        import datetime, socket
+        now = datetime.datetime.now().astimezone()
+        dt_str = now.strftime("%A, %B %-d, %Y  %I:%M %p  %Z")
+        hostname = socket.gethostname()
+        parts = [f"=== System context ===",
+                 f"DateTime : {dt_str}",
+                 f"Host     : {hostname}",
+                 f"CWD      : {os.getcwd()}",
+                 ""]
         if self.history:
             parts.append("=== Previous steps ===")
             for i, h in enumerate(self.history[-3:], 1):  # last 3 steps for context

@@ -1,108 +1,174 @@
-# Machine Control Agent — Parallel Speculative CoT
+# Speculative Agent — Cross-Vendor Parallel CoT Machine Controller
 
-All locally pulled Ollama models race in parallel using chain-of-thought reasoning.
-A supervisor monitors token streams in real-time and short-circuits the race when
-any model reaches high confidence. **Every proposed action requires your explicit
-approval before it runs.**
+Multiple AI models from competing providers race in parallel on every task using
+chain-of-thought reasoning. A supervisor short-circuits the race the moment any
+model reaches high confidence. The winning action is compliance-checked against
+a full regulatory lattice before execution.
 
-## Setup
+**No other system does this.** OpenAI, Anthropic, Google, and xAI each run their
+models in isolation. This agent races them all simultaneously — the best answer
+wins regardless of vendor.
 
-```bash
-pip install -r requirements.txt
-```
+---
 
-Make sure Ollama is running:
-```bash
-ollama serve
-```
-
-### How many models do you need?
-
-**Minimum: 1** (works, but no race). **Recommended minimum: 3** for meaningful speculation.
-
-The agent auto-detects RAM and limits how many models run simultaneously:
-
-```
-max_parallel = floor((total_ram - 2 GB) / avg_model_size_gb)
-```
-
-Pick a starter set based on your RAM:
-
-| RAM | Pull these models | Parallel at once |
-|-----|-------------------|-----------------|
-| 8 GB | `llama3.2:1b` + `qwen2.5-coder` | 2 |
-| 16 GB | + `gemma3:4b` + `distilled-phi3.5` + `deepseek-r1` | 3 |
-| 32 GB | + `mistral` + `llama3.2` | 5+ |
-| 64 GB+ | + `llama3.3:70b` | 7+ |
-
-You can pull more models than fit in RAM — extras queue behind the semaphore and run when a slot frees. They just won't truly race in parallel.
-
-**Recommended diversity:** one fast/small model, one code-focused, one deep reasoner.
+## Quickstart
 
 ```bash
-# 8 GB minimum
-ollama pull llama3.2:1b
-ollama pull qwen2.5-coder
-
-# 16 GB recommended
-ollama pull llama3.2:1b
-ollama pull distilled-phi3.5
-ollama pull gemma3:4b
-ollama pull qwen2.5-coder
-ollama pull deepseek-r1
+./run.sh                          # sets up venv, installs deps, starts agent
+./run.sh --budget performance     # unlock paid models (requires API keys)
+./run.sh --autonomy full          # fully autonomous, no approval prompts
 ```
 
-Override which models race (without changing code):
+---
+
+## Model providers
+
+The agent discovers and races models from every configured source simultaneously.
+Set any combination of keys — each one adds that provider directly to the race pool
+with no routing overhead.
+
+| Source | Env var | Models | Cost |
+|--------|---------|--------|------|
+| **Local** (Ollama) | *(auto-detected)* | Any pulled model | Free |
+| **OpenRouter** | `OPENROUTER_API_KEY` | All `:free` models, auto-ranked by context | Free |
+| **OpenAI** | `OPENAI_API_KEY` | gpt-4o-mini, gpt-4o, o3-mini | Pay-per-token |
+| **Anthropic** | `ANTHROPIC_API_KEY` | claude-haiku-3.5, claude-sonnet-4 | Pay-per-token |
+| **Google** | `GOOGLE_API_KEY` | gemini-2.0-flash, gemini-2.5-pro | Pay-per-token |
+| **xAI** | `XAI_API_KEY` | grok-3-mini, grok-3 | Pay-per-token |
+| **Mistral** | `MISTRAL_API_KEY` | mistral-small, mistral-large | Pay-per-token |
+
+Local models are **disabled by default** when cloud keys are present — cloud models
+are faster and stronger for most tasks. Use `--local` or `AGENT_LOCAL=1` to force
+them into the race.
+
+---
+
+## Budget tiers
+
+Controls which paid models enter the race. The agent also auto-classifies each task
+and upgrades within your ceiling (e.g. vision/speed keywords trigger `performance`).
+
 ```bash
-AGENT_MODELS="llama3.2:1b,qwen2.5-coder:latest" python agent.py
+./run.sh                          # free: OpenRouter :free models only
+./run.sh --budget standard        # + gpt-4o-mini, claude-haiku, gemini-flash
+./run.sh --budget performance     # + gpt-4o, claude-sonnet-4, gemini-2.5-pro, grok-3
 ```
 
-## Run
+Also via env var: `AGENT_BUDGET=performance ./run.sh`
+
+---
+
+## Autonomy
 
 ```bash
-# Interactive REPL
-python agent.py
-
-# Single task
-python agent.py "list all Python files in my home directory"
-
-# List models + exit
-python agent.py --list-models
+./run.sh                          # normal: auto-run safe actions, ask for destructive ones
+./run.sh --autonomy full          # never ask — fully autonomous
+./run.sh --autonomy off           # approve every action (original behaviour)
 ```
 
-## How it works
+**Destructive patterns that always prompt** (in `normal` mode):
+`rm`, `sudo`, `dd of=`, `mkfs`, `curl|sh`, SQL `DROP`/`DELETE`, writes to `/etc/` `/usr/` `/bin/`
 
-1. **Discover** — auto-detects all locally pulled Ollama models
-2. **Warmup** — sends a `ping` to each model in parallel; failed models are excluded
-3. **Hardware limit** — `max_parallel_models` is derived from CPU cores, RAM, and GPU VRAM so you don't thrash the machine
-4. **Race** — all models stream their reasoning simultaneously
-5. **Supervise** — the supervisor scores each stream every 150ms; if any model hits `≥85%` confidence AND has a valid action block, it wins and the others are cancelled
-6. **Approve** — you see the proposed action and must type `y` to run it
-7. **Execute** — runs via `bash`, `python_exec` (subprocess sandbox), `pyautogui`, or `write_file`
+---
+
+## Compliance lattice
+
+Every action passes through a **tropical compliance lattice** before execution.
+The system computes a Lagrangian `L = Σ λᵢ · cᵢ(action)` across all applicable
+regulations. `L = 0` → permitted. `L > 0` → blocked with per-regulation justification.
+
+Regulations checked: **SOC I/II/III, GDPR, CCPA, HIPAA, GLBA, FCRA, Metro II, CDIA, ISO 27001**
+
+```
+════════════════════════════════════════════════════════════
+  🚫 COMPLIANCE DECISION — BASH
+  Lagrangian L = 2.50  (FAIL)
+────────────────────────────────────────────────────────────
+  ✓ [SOC-II        ] Recorded in immutable audit log
+  ✗ [GDPR          ] Art.5(1)(e): retention period not elapsed (45 of 730 days)
+  ✗ [HIPAA         ] PHI must be retained 6 years. Record is 45 days old
+  ◑ [ISO-27001     ] Secure disposal required. Document method.
+  BLOCKED BY: GDPR, HIPAA
+════════════════════════════════════════════════════════════
+```
+
+All decisions are written to an **append-only chained audit log** at
+`~/.agent_audit.jsonl`. Each entry SHA-256 hashes the previous line for
+SOC II tamper evidence.
+
+---
+
+## Privacy routing
+
+Tasks containing sensitive keywords (`password`, `ssh`, `medical`, `bank`, etc.)
+are automatically routed to **local models only** — data never leaves the machine.
+Cloud models are used for everything else.
+
+---
+
+## How the race works
+
+1. **Screenshot** — agent captures screen state and injects dimensions + base64 image into every model's prompt
+2. **Race** — all models stream simultaneously, color-coded by provider in the terminal
+3. **Short-circuit** — supervisor scores streams every 150ms; first model to hit ≥85% confidence with a valid action block wins, others are cancelled
+4. **Compliance check** — Lagrangian evaluated; blocked if any regulation fires
+5. **Autonomy gate** — destructive patterns prompt for approval; safe actions run immediately
+6. **Execute** — action runs; result + any error fed back into next race step
+7. **Pipeline** — loops until model returns `noop` (task complete) or step limit reached
+
+---
 
 ## Action types
 
 | Type | What it does |
 |------|-------------|
-| `bash` | Runs a shell command via `subprocess` |
-| `python_exec` | Writes code to a temp file and runs it in a subprocess |
-| `pyautogui` | Controls mouse/keyboard (`click`, `type`, `hotkey`, `screenshot`, `scroll`, `moveTo`) |
-| `write_file` | Writes content to a file path |
-| `read_file` | Reads a file and returns its content |
-| `noop` | Does nothing (task complete) |
+| `bash` | Shell command via subprocess |
+| `python_exec` | Code written to temp file, run in child process |
+| `pyautogui` | Mouse/keyboard control with live screen coordinates |
+| `playwright` | Full browser automation (navigate, click, fill, scrape) |
+| `write_file` | Write content to a path |
+| `read_file` | Read a file into model context |
+| `noop` | Task complete — stops the pipeline |
 
-## Safety
+---
 
-- `FAILSAFE = True` on pyautogui: move mouse to top-left corner to instantly abort
-- All destructive actions always require `y` approval
-- Models run in a separate HTTP session; no persistent state between races
-- Python code runs in a child subprocess, not `exec()` in-process
+## REPL commands
+
+```
+/models    — show all active models with provider, tier, context length
+/history   — session history with per-step cost tracking
+/thoughts  — full raw reasoning from every model in the last race
+/quit      — exit
+```
+
+---
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | — | Enables free + paid cloud models via OpenRouter |
+| `OPENAI_API_KEY` | — | Direct OpenAI (no routing overhead) |
+| `ANTHROPIC_API_KEY` | — | Direct Anthropic |
+| `GOOGLE_API_KEY` | — | Direct Google Gemini |
+| `XAI_API_KEY` | — | Direct xAI Grok |
+| `MISTRAL_API_KEY` | — | Direct Mistral |
+| `AGENT_BUDGET` | `free` | `free` / `standard` / `performance` |
+| `AGENT_AUTONOMY` | `normal` | `off` / `normal` / `full` |
+| `AGENT_LOCAL` | `0` | `1` to force local models into race alongside cloud |
+| `AGENT_MODELS` | *(allowlist)* | Comma-separated Ollama model names to include |
+| `OPENROUTER_MAX_MODELS` | `5` | Max free OpenRouter models in race |
+| `AGENT_AUDIT_LOG` | `~/.agent_audit.jsonl` | Compliance audit log path |
+| `OLLAMA_HOST` | `http://localhost:11434` | Remote Ollama instance |
+
+---
 
 ## Tuning
 
-Edit `supervisor.py`:
-- `SHORT_CIRCUIT_THRESHOLD` (default `0.85`) — lower = faster short-circuit, less accurate
-- `MIN_TOKENS_FOR_SHORTCIRCUIT` (default `40`) — minimum reasoning tokens before a win is possible
+`supervisor.py`:
+- `SHORT_CIRCUIT_THRESHOLD` (default `0.85`) — confidence needed to win the race
+- `MIN_TOKENS_FOR_SHORTCIRCUIT` (default `40`) — minimum reasoning tokens before a win counts
 
-Edit `config.py`:
-- `OLLAMA_BASE` — point at a remote Ollama instance if needed
+`compliance.py`:
+- Add constraint functions to `_CONSTRAINTS` list to extend the regulatory lattice
+- Add patterns to `_DESTRUCTIVE_PATTERNS` in `executor.py` for custom safety rules

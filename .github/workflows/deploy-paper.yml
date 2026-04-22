@@ -50,6 +50,7 @@ jobs:
           cp paper/main.html   _site/index.html
           cp paper/style.css   _site/style.css
           cp paper/favicon.svg _site/favicon.svg
+          cp paper/favicon.svg _site/eval/favicon.svg
           cp eval/index.html   _site/eval/index.html
 
       - name: Upload Pages artifact

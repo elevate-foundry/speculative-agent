@@ -16,8 +16,10 @@ Usage:
 import asyncio
 import sys
 import os
+import base64
 import argparse
 import json
+import tempfile
 from typing import Optional
 
 from config import discover_and_warmup, HardwareProfile, ModelInfo, OLLAMA_BASE
@@ -74,7 +76,26 @@ class Agent:
         self.history: list[dict] = []  # task + action + result log
         self.last_streams = []          # raw ModelStream objects from last race
 
-    def _build_prompt(self, task: str, context: Optional[str] = None) -> str:
+    def _get_screen_context(self) -> tuple[str, Optional[str]]:
+        """
+        Takes a screenshot and returns (text_context, screenshot_path).
+        text_context describes screen size and the path to the screenshot.
+        Returns ('', None) if pyautogui/Pillow is unavailable.
+        """
+        try:
+            import pyautogui
+            size = pyautogui.size()
+            path = os.path.join(tempfile.gettempdir(), "agent_screen.png")
+            pyautogui.screenshot(path)
+            ctx = (f"Screen: {size.width}x{size.height}px. "
+                   f"Current screenshot saved to {path}. "
+                   f"Use these exact pixel dimensions for any click/moveTo coordinates.")
+            return ctx, path
+        except Exception:
+            return "", None
+
+    def _build_prompt(self, task: str, context: Optional[str] = None,
+                      screen_ctx: Optional[str] = None) -> str:
         parts = []
         if self.history:
             parts.append("=== Previous steps ===")
@@ -85,6 +106,8 @@ class Agent:
                 if not h.get("success") and h.get("error"):
                     parts.append(f"  ERROR: {h['error']}")
                     parts.append(f"  -> You must fix this error and try a different approach.")
+        if screen_ctx:
+            parts.append(f"\n=== Screen context ===\n{screen_ctx}")
         if context:
             parts.append(f"\n=== Context ===\n{context}")
         parts.append(f"\n=== Current task ===\n{task}")
@@ -106,7 +129,14 @@ class Agent:
             print(f"  STEP {step}/{max_steps}  —  {task[:70]}")
             print(f"{'━'*60}")
 
-            prompt = self._build_prompt(task)
+            screen_ctx, screenshot_path = self._get_screen_context()
+            prompt = self._build_prompt(task, screen_ctx=screen_ctx)
+
+            # Build base64 image payload for vision-capable OpenRouter models
+            screenshot_b64: Optional[str] = None
+            if screenshot_path and os.path.exists(screenshot_path):
+                with open(screenshot_path, "rb") as f:
+                    screenshot_b64 = base64.b64encode(f.read()).decode()
 
             action, streams = await supervise_race(
                 model_names=model_names,
@@ -115,6 +145,7 @@ class Agent:
                 ollama_base=OLLAMA_BASE,
                 verbose=self.verbose,
                 live_output=True,
+                screenshot_b64=screenshot_b64,
             )
             self.last_streams = streams
 

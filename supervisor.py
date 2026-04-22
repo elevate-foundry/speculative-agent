@@ -157,16 +157,28 @@ async def _stream_openrouter(
     cancel_event: asyncio.Event,
     color: str,
     live_output: bool,
+    screenshot_b64: Optional[str] = None,
 ) -> None:
     import httpx
     import json as _json
     from config import OPENROUTER_BASE, OPENROUTER_API_KEY
 
+    # Build user message — include screenshot for vision-capable models
+    if screenshot_b64:
+        user_content = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {
+                "url": f"data:image/png;base64,{screenshot_b64}"
+            }},
+        ]
+    else:
+        user_content = prompt
+
     payload = {
         "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": prompt},
+            {"role": "user",   "content": user_content},
         ],
         "stream": True,
         "max_tokens": 512,
@@ -216,6 +228,7 @@ async def stream_model(
     ollama_base: str = "http://localhost:11434",
     system_prompt: str = "",
     live_output: bool = True,
+    screenshot_b64: Optional[str] = None,
 ) -> None:
     label = _model_label(model_name, stream_obj.provider)
     color = _MODEL_COLORS.get(model_name, "")
@@ -226,7 +239,8 @@ async def stream_model(
     try:
         if stream_obj.provider == "openrouter":
             await _stream_openrouter(model_name, prompt, system_prompt,
-                                     stream_obj, cancel_event, color, live_output)
+                                     stream_obj, cancel_event, color, live_output,
+                                     screenshot_b64=screenshot_b64)
         else:
             await _stream_ollama(model_name, prompt, system_prompt,
                                  stream_obj, cancel_event, ollama_base, color, live_output)
@@ -250,6 +264,7 @@ async def supervise_race(
     ollama_base: str = "http://localhost:11434",
     verbose: bool = True,
     live_output: bool = True,
+    screenshot_b64: Optional[str] = None,
 ) -> tuple[Optional[Action], list[ModelStream]]:
     """
     Run all models in parallel. Monitor streams. Short-circuit if any
@@ -272,7 +287,7 @@ async def supervise_race(
     tasks = {
         m.name: asyncio.create_task(
             stream_model(m.name, prompt, streams[m.name], cancel_event, ollama_base, system_prompt,
-                         live_output=live_output)
+                         live_output=live_output, screenshot_b64=screenshot_b64)
         )
         for m in models_info
     }

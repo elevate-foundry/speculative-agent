@@ -36,26 +36,62 @@ fi
 
 echo "▶ Run ID: $RUN_ID  →  https://github.com/$REPO/actions/runs/$RUN_ID"
 
-# ── 3. Poll until complete ────────────────────────────────────────────────────
+# ── 3. Stream live log output ─────────────────────────────────────────────────
+echo "▶ Streaming CI log…"
+echo ""
+
+LAST_STEP=""
 ELAPSED=0
 while true; do
+  # Fetch job steps with their status
+  STEPS=$(gh run view "$RUN_ID" --repo "$REPO" --json jobs 2>/dev/null \
+    | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for job in data.get('jobs', []):
+    for step in job.get('steps', []):
+        status = step.get('status','')
+        conclusion = step.get('conclusion') or ''
+        name = step.get('name','')
+        if status == 'in_progress':
+            icon = '\033[34m⟳\033[0m'
+        elif conclusion == 'success':
+            icon = '\033[32m✓\033[0m'
+        elif conclusion in ('failure','cancelled'):
+            icon = '\033[31m✗\033[0m'
+        else:
+            icon = ' '
+        print(f'{icon} {name}')
+" 2>/dev/null || true)
+
+  # Reprint steps (move cursor up to overwrite)
+  STEP_COUNT=$(echo "$STEPS" | wc -l)
+  if [[ -n "$LAST_STEP" ]]; then
+    printf "\033[%dA" "$STEP_COUNT"
+  fi
+  echo "$STEPS"
+  LAST_STEP="$STEPS"
+
+  # Check overall run status
   RESULT=$(gh run view "$RUN_ID" --repo "$REPO" --json status,conclusion \
     | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['status'],r.get('conclusion',''))")
   STATUS=$(echo "$RESULT" | awk '{print $1}')
   CONCLUSION=$(echo "$RESULT" | awk '{print $2}')
 
   if [[ "$STATUS" == "completed" ]]; then
+    echo ""
     if [[ "$CONCLUSION" == "success" ]]; then
       echo "✓ CI passed (${ELAPSED}s)"
       break
     else
       echo "✗ CI failed: $CONCLUSION"
-      gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -40 || true
+      echo ""
+      echo "── Failed step output ──────────────────────────────────"
+      gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -50 || true
       exit 1
     fi
   fi
 
-  printf "  …%s (%ds)\r" "$STATUS" "$ELAPSED"
   sleep $POLL
   ELAPSED=$((ELAPSED + POLL))
 

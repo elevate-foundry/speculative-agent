@@ -596,6 +596,39 @@ function startRace() {
     }
   });
 
+  evtSource.addEventListener('braid_token', e => {
+    const d = JSON.parse(e.data);
+    if (!cols['__braid__']) {
+      cols['__braid__'] = createColumn('⬡ Braid Synthesis', '#e2b96f', true);
+      document.getElementById('race-status').textContent = '⬡ braiding…';
+    }
+    const body = cols['__braid__'].body;
+    const span = document.createElement('span');
+    span.className = 'token';
+    span.textContent = d.token;
+    body.appendChild(span);
+    body.scrollTop = body.scrollHeight;
+    cols['__braid__'].tokens++;
+    cols['__braid__'].meta.textContent = `${cols['__braid__'].tokens} tok`;
+  });
+
+  evtSource.addEventListener('braid_done', e => {
+    const d = JSON.parse(e.data);
+    if (!cols['__braid__']) return;
+    const c = cols['__braid__'];
+    const verdict = d.lagrangian === 0 ? 'PERMIT' : d.lagrangian <= 0.5 ? 'CONDITIONAL' : 'BLOCK';
+    const badge = document.createElement('div');
+    badge.className = 'done-overlay';
+    badge.innerHTML =
+      `<span style="color:#e2b96f;font-weight:700">⬡ BRAID</span>` +
+      `<span>ℒ=${(d.lagrangian||0).toFixed(2)}</span>` +
+      `<span class="badge badge-${verdict}">${verdict}</span>` +
+      `<span>${d.tokens||0} tok</span>`;
+    c.wrap.appendChild(badge);
+    c.meta.textContent = `${c.tokens} tok · done`;
+    document.getElementById('race-status').textContent = '⬡ braid complete';
+  });
+
   evtSource.addEventListener('end', e => {
     const d = JSON.parse(e.data);
     document.getElementById('go-btn').disabled = false;
@@ -614,10 +647,14 @@ function startRace() {
   };
 }
 
-function createColumn(name, color) {
+function createColumn(name, color, isBraid) {
   const arena = document.getElementById('arena');
   const wrap = document.createElement('div');
   wrap.className = 'col-wrap';
+  if (isBraid) {
+    wrap.style.borderLeft = '2px solid #e2b96f';
+    wrap.style.minWidth = '300px';
+  }
 
   const hdr = document.createElement('div');
   hdr.className = 'col-header';
@@ -773,6 +810,46 @@ def _run_race_sse(task: str, send_sse) -> None:
             }))
         except Exception:
             pass
+
+    # Braid phase — synthesise all responses using the winner model
+    if winner_name and streams:
+        try:
+            from supervisor import braid_responses
+            from agent import SYSTEM_PROMPT as _SP
+
+            braid_tokens = []
+
+            async def _braid():
+                async for tok in braid_responses(
+                    streams, winner_action, task, _SP,
+                    ollama_base=OLLAMA_BASE, max_tokens=1024,
+                ):
+                    braid_tokens.append(tok)
+                    try:
+                        send_sse("braid_token", json.dumps({"token": tok}))
+                    except Exception:
+                        break
+
+            loop.run_until_complete(_braid())
+            braid_text = "".join(braid_tokens)
+            # Compliance check on braid's proposed action
+            braid_lagrangian = 0.0
+            try:
+                braid_action = parse_action_from_text(braid_text, winner_name)
+                if braid_action and braid_action.payload:
+                    path = braid_action.payload.get("command", braid_action.payload.get("path", ""))
+                    ctx = infer_context(path, task)
+                    decision = evaluate(braid_action.action_type, braid_action.payload, ctx)
+                    braid_lagrangian = decision.lagrangian_value
+            except Exception:
+                pass
+            send_sse("braid_done", json.dumps({
+                "model": winner_name,
+                "lagrangian": braid_lagrangian,
+                "tokens": len(braid_tokens),
+            }))
+        except Exception as e:
+            send_sse("braid_done", json.dumps({"error": str(e), "model": winner_name}))
 
     try:
         send_sse("end", json.dumps({

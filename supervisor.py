@@ -560,6 +560,96 @@ async def supervise_race(
     return winner, list(streams.values())
 
 
+async def braid_responses(
+    streams: list[ModelStream],
+    winner: Optional[Action],
+    original_prompt: str,
+    system_prompt: str,
+    ollama_base: str = "http://localhost:11434",
+    max_tokens: int = 1024,
+) -> AsyncIterator[str]:
+    """
+    Post-race synthesis: feed all model responses to the winner model and ask
+    it to braid them into a single optimal response.
+
+    Yields tokens as they stream. The winner model acts as the arbiter —
+    it has already demonstrated the highest reasoning score, so it's best
+    placed to identify what each peer response got right that it missed.
+
+    Formalisation (tropical semiring analogy):
+        braid(r₁,…,rₙ) = argmin_{synthesis} Σ d(synthesis, rᵢ)
+    where d is semantic distance — the synthesis minimises total information
+    loss across all responses, just as tropical ⊕=min minimises path cost.
+    """
+    # Build context from all completed, non-errored streams
+    peer_texts = []
+    for s in streams:
+        if s.text and not s.error and (not winner or s.model_name != winner.model_source):
+            short = s.model_name.split("/")[-1].split(":")[0][:20]
+            peer_texts.append(f"[{short}]\n{s.text.strip()}")
+
+    if not peer_texts:
+        return  # nothing to braid
+
+    synthesis_prompt = (
+        f"Original task: {original_prompt}\n\n"
+        f"You just produced your own response to the above task. "
+        f"Below are responses from {len(peer_texts)} peer model(s) that raced alongside you:\n\n"
+        + "\n\n---\n\n".join(peer_texts)
+        + "\n\n---\n\n"
+        "Now produce a single **braided synthesis**: a response that is strictly better than any "
+        "individual response above by incorporating the best insights from each. "
+        "Where peers identified something you missed, include it. "
+        "Where you were more precise, keep your formulation. "
+        "Output only the final synthesised response — no meta-commentary."
+    )
+
+    # Determine which provider/model to use for synthesis (the winner's model)
+    winner_model = winner.model_source if winner else None
+    if not winner_model:
+        return
+
+    # Find the winner's stream to get its provider info
+    winner_stream = next((s for s in streams if s.model_name == winner_model), None)
+    provider = winner_stream.provider if winner_stream else "ollama"
+
+    # Reuse stream_model machinery — create a throw-away ModelStream
+    braid_stream = ModelStream(model_name=winner_model, provider=provider)
+    cancel = asyncio.Event()
+
+    # Find provider_config for winner
+    provider_config = None
+    try:
+        from providers import active_providers
+        for p in active_providers():
+            if p.name == provider:
+                provider_config = p
+                break
+    except Exception:
+        pass
+
+    task = asyncio.create_task(
+        stream_model(winner_model, synthesis_prompt, braid_stream, cancel,
+                     ollama_base=ollama_base, system_prompt=system_prompt,
+                     live_output=False, provider_config=provider_config,
+                     max_tokens=max_tokens)
+    )
+
+    emitted = 0
+    while not braid_stream.done:
+        await asyncio.sleep(0.04)
+        new = braid_stream.tokens[emitted:]
+        for tok in new:
+            yield tok
+        emitted += len(new)
+
+    # drain remainder
+    for tok in braid_stream.tokens[emitted:]:
+        yield tok
+
+    await task
+
+
 def print_race_summary(streams: list[ModelStream]) -> None:
     print("\n" + "═" * 60)
     print("  RACE SUMMARY")

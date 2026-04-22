@@ -90,61 +90,96 @@ class Agent:
         parts.append(f"\n=== Current task ===\n{task}")
         return "\n".join(parts)
 
-    async def run_task(self, task: str, _retry: int = 0) -> Optional[ActionResult]:
-        MAX_RETRIES = 2
+    async def run_task(self, task: str, max_steps: int = 20, max_retries_per_step: int = 2) -> Optional[ActionResult]:
+        """
+        Infinite pipeline mode: races models, executes the winner's action, feeds
+        the result back, and races again — until a model returns noop (done) or
+        max_steps is reached. Each step can retry up to max_retries_per_step times
+        on failure before moving on.
+        """
         model_names = [m.name for m in self.models]
-        prompt = self._build_prompt(task)
+        last_result: Optional[ActionResult] = None
+        consecutive_failures = 0
 
-        action, streams = await supervise_race(
-            model_names=model_names,
-            prompt=prompt,
-            system_prompt=SYSTEM_PROMPT,
-            ollama_base=OLLAMA_BASE,
-            verbose=self.verbose,
-            live_output=True,
-        )
-        self.last_streams = streams
+        for step in range(1, max_steps + 1):
+            print(f"\n{'━'*60}")
+            print(f"  STEP {step}/{max_steps}  —  {task[:70]}")
+            print(f"{'━'*60}")
 
-        if self.verbose:
-            print_race_summary(streams)
+            prompt = self._build_prompt(task)
 
-        if action is None:
-            print("\n[agent] No model produced a valid action. Showing raw outputs:\n")
-            for s in streams:
-                if s.text:
-                    print(f"--- {s.model_name} ---")
-                    print(s.text[:800])
-                    print()
-            return None
+            action, streams = await supervise_race(
+                model_names=model_names,
+                prompt=prompt,
+                system_prompt=SYSTEM_PROMPT,
+                ollama_base=OLLAMA_BASE,
+                verbose=self.verbose,
+                live_output=True,
+            )
+            self.last_streams = streams
 
-        print(f"\n[agent] Proposed action: {action.action_type} — {action.description}")
+            if self.verbose:
+                print_race_summary(streams)
 
-        result = execute(action)
+            if action is None:
+                print("\n[agent] No model produced a valid action. Showing raw outputs:\n")
+                for s in streams:
+                    if s.text:
+                        print(f"--- {s.model_name} ---")
+                        print(s.text[:800])
+                        print()
+                consecutive_failures += 1
+                if consecutive_failures >= max_retries_per_step:
+                    print(f"[agent] {consecutive_failures} consecutive steps with no valid action. Stopping.")
+                    break
+                continue
 
-        entry = {
-            "task": task,
-            "action_type": action.action_type,
-            "model": action.model_source,
-            "description": action.description,
-            "success": result.success,
-            "result": result.output[:500] if result.output else "",
-            "error": result.error,
-        }
-        self.history.append(entry)
+            consecutive_failures = 0
 
-        if result.success:
-            print(f"\n[agent] ✓ Success")
-            if result.output:
-                print(result.output[:1000])
-        else:
-            print(f"\n[agent] ✗ Failed: {result.error}")
-            if _retry < MAX_RETRIES:
-                print(f"[agent] Retrying ({_retry + 1}/{MAX_RETRIES}) with error context fed back to models...\n")
-                return await self.run_task(task, _retry=_retry + 1)
+            # noop means the model considers the task complete
+            if action.action_type == "noop":
+                print(f"\n[agent] ✓ Task complete (declared by {action.model_source} at step {step})")
+                if action.description and action.description != "(no description)":
+                    print(f"  {action.description}")
+                break
+
+            print(f"\n[agent] Step {step} — {action.action_type} from [{action.model_source}]: {action.description}")
+
+            result = execute(action)
+            last_result = result
+
+            entry = {
+                "task": task,
+                "step": step,
+                "action_type": action.action_type,
+                "model": action.model_source,
+                "description": action.description,
+                "success": result.success,
+                "result": result.output[:500] if result.output else "",
+                "error": result.error,
+            }
+            self.history.append(entry)
+
+            if result.success:
+                print(f"\n[agent] ✓ Step {step} succeeded")
+                if result.output:
+                    print(result.output[:1000])
             else:
-                print(f"[agent] Max retries reached. Giving up on this task.")
+                print(f"\n[agent] ✗ Step {step} failed: {result.error}")
+                consecutive_failures += 1
+                if consecutive_failures >= max_retries_per_step:
+                    print(f"[agent] {consecutive_failures} consecutive failures. Stopping pipeline.")
+                    break
+                print(f"[agent] Feeding error back to models for next step...\n")
+                # history already has the error — next iteration will include it in prompt
+                continue
 
-        return result
+            consecutive_failures = 0
+
+        else:
+            print(f"\n[agent] Reached max steps ({max_steps}). Pipeline stopped.")
+
+        return last_result
 
     def show_history(self):
         if not self.history:
@@ -155,7 +190,8 @@ class Agent:
         print("─" * 60)
         for i, h in enumerate(self.history, 1):
             status = "✓" if h["success"] else "✗"
-            print(f"  {i}. [{status}] [{h['model']}] {h['action_type']}: {h['task'][:60]}")
+            step = f"s{h['step']} " if "step" in h else ""
+            print(f"  {i}. [{status}] {step}[{h['model']}] {h['action_type']}: {h['task'][:55]}")
         print("═" * 60)
 
     def show_thoughts(self):
@@ -217,6 +253,7 @@ async def main():
     parser.add_argument("task", nargs="?", help="Single task to run, then exit")
     parser.add_argument("--list-models", action="store_true", help="List available models and exit")
     parser.add_argument("--quiet", action="store_true", help="Suppress supervisor stream logs")
+    parser.add_argument("--max-steps", type=int, default=20, help="Max pipeline steps per task (default 20)")
     args = parser.parse_args()
 
     print("Discovering and warming up Ollama models...")
@@ -229,7 +266,7 @@ async def main():
         return
 
     if args.task:
-        await agent.run_task(args.task)
+        await agent.run_task(args.task, max_steps=args.max_steps)
     else:
         await interactive_repl(agent)
 

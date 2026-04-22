@@ -339,6 +339,11 @@ async def warmup_model(model: ModelInfo, semaphore: asyncio.Semaphore) -> ModelI
     """Send a minimal prompt to ensure the model is loaded into memory."""
     if model.provider == "openrouter":
         return await warmup_openrouter_model(model)
+    if model.provider_config is not None:
+        # Direct provider — no local warmup needed; API is always live
+        model.warmed = True
+        model.warm_latency_ms = 0.0
+        return model
     async with semaphore:
         import time
         t0 = time.perf_counter()
@@ -393,13 +398,15 @@ async def discover_and_warmup(verbose: bool = True) -> tuple[list[ModelInfo], Ha
         raise RuntimeError("No Ollama models found and no OPENROUTER_API_KEY set.")
 
     # --- Direct provider models (OpenAI, Anthropic, Google, xAI, Mistral) ---
-    from providers import models_for_tier, active_providers
+    from providers import models_for_tier, active_providers, discover_all_provider_models
     direct_models = []
     active = active_providers()
     if active:
         if verbose:
             names = [p.name for p in active]
             print(f"[config] Direct provider keys detected: {names}")
+            print(f"[config] Discovering models from direct providers...")
+        await discover_all_provider_models(verbose=verbose)
         for prov, model_id in models_for_tier(BUDGET_TIER):
             direct_models.append(ModelInfo(
                 name=model_id,
@@ -445,9 +452,13 @@ async def discover_and_warmup(verbose: bool = True) -> tuple[list[ModelInfo], Ha
             if m.provider == "openrouter":
                 ctx_str = f"{m.context_length//1000}k ctx" if m.context_length else "?k ctx"
                 tag = f"☁ openrouter  {ctx_str}  free"
+                warmup = "(catalog)"
+            elif m.provider_config is not None:
+                tag = f"☁ {m.provider:<12} direct"
+                warmup = "(api)"
             else:
                 tag = f"⬡ local       {m.size_gb:.1f} GB"
-            warmup = "(catalog)" if m.provider == "openrouter" else f"{m.warm_latency_ms:.0f}ms"
+                warmup = f"{m.warm_latency_ms:.0f}ms"
             print(f"  ✓ {m.name:<50} {tag}  warmup={warmup}")
         for m in dead:
             print(f"  ✗ {m.name} — failed to warm")

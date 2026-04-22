@@ -13,9 +13,13 @@ Supported providers (set the env var to activate):
   MISTRAL_API_KEY      → mistral
 
 Adding a new provider: add an entry to PROVIDER_REGISTRY below.
+Model lists are auto-discovered at startup via each provider's /models endpoint.
+The static lists below are fallbacks used only when discovery fails.
 """
 
 import os
+import httpx
+import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -86,6 +90,99 @@ PROVIDER_REGISTRY: list[ProviderConfig] = [
 def active_providers() -> list[ProviderConfig]:
     """Return only providers that have an API key configured."""
     return [p for p in PROVIDER_REGISTRY if p.api_key]
+
+
+# Keywords that suggest a model is standard vs performance tier
+_PERFORMANCE_HINTS = ("large", "pro", "plus", "max", "ultra", "heavy",
+                      "sonnet", "opus", "gpt-4o", "o1", "o3",
+                      "gemini-2.5", "grok-3", "mistral-large", "premier")
+_STANDARD_HINTS    = ("mini", "haiku", "flash", "small", "nano", "micro",
+                      "3-mini", "lite", "fast")
+
+
+def _classify_model_tier(model_id: str) -> str:
+    mid = model_id.lower()
+    if any(h in mid for h in _PERFORMANCE_HINTS):
+        return "performance"
+    if any(h in mid for h in _STANDARD_HINTS):
+        return "standard"
+    return "standard"  # default to standard if unclear
+
+
+async def discover_provider_models(provider: ProviderConfig, verbose: bool = False) -> None:
+    """
+    Query the provider's /models endpoint and update provider.models in place.
+    Falls back to the static list if the API call fails.
+    Filters to chat/text-generation models only.
+    """
+    if not provider.api_key:
+        return
+
+    headers = {provider.auth_header: f"{provider.auth_prefix} {provider.api_key}".strip()}
+    headers.update(provider.extra_headers)
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{provider.base_url}/models", headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        # Normalise: OpenAI/Mistral/xAI return {"data": [...]}
+        # Anthropic returns {"models": [...]} but we skip it above
+        # Google returns {"models": [...]} with name like "models/gemini-2.0-flash"
+        raw = data.get("data") or data.get("models") or []
+
+        chat_models: list[str] = []
+        for m in raw:
+            mid = m.get("id") or m.get("name", "")
+            # Google prefixes with "models/" — strip it
+            if mid.startswith("models/"):
+                mid = mid[len("models/"):]
+            if not mid:
+                continue
+            # Filter to generative text models only
+            skip_keywords = ("embedding", "embed", "tts", "whisper", "dall-e",
+                             "image", "vision-only", "moderation", "instruct-v")
+            if any(k in mid.lower() for k in skip_keywords):
+                continue
+            # Google-specific: skip non-generative model types
+            supported = m.get("supportedGenerationMethods") or []
+            if supported and "generateContent" not in supported and "streamGenerateContent" not in supported:
+                continue
+            chat_models.append(mid)
+
+        if not chat_models:
+            return  # discovery returned nothing useful, keep fallback
+
+        # Bucket into tiers
+        standard: list[str] = []
+        performance: list[str] = []
+        for mid in chat_models:
+            if _classify_model_tier(mid) == "performance":
+                performance.append(mid)
+            else:
+                standard.append(mid)
+
+        provider.models = {
+            "standard": standard,
+            "performance": performance,
+        }
+
+        if verbose:
+            print(f"[providers] {provider.name}: discovered {len(standard)} standard, "
+                  f"{len(performance)} performance models")
+
+    except Exception as e:
+        if verbose:
+            print(f"[providers] {provider.name}: model discovery failed ({e}), using fallback list")
+
+
+async def discover_all_provider_models(verbose: bool = False) -> None:
+    """Run model discovery for all active providers in parallel."""
+    await asyncio.gather(*[
+        discover_provider_models(p, verbose=verbose)
+        for p in active_providers()
+    ])
 
 
 def models_for_tier(tier: str) -> list[tuple[ProviderConfig, str]]:

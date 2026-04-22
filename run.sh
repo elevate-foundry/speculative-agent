@@ -43,4 +43,9 @@ if [ -z "$OPENROUTER_API_KEY" ]; then
 fi
 
 echo "[run.sh] Starting agent..."
-exec .venv/bin/python agent.py "$@"
+# Default to full autonomy + performance intelligence when called with no flags
+if [ $# -eq 0 ]; then
+    exec .venv/bin/python agent.py --autonomy full
+else
+    exec .venv/bin/python agent.py "$@"
+fi

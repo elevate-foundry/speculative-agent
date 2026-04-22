@@ -72,9 +72,15 @@ class ConstraintResult:
 _READ_ONLY_BASH = ("cat ", "grep ", "tail ", "head ", "less ", "more ", "wc ",
                    "ls ", "find ", "stat ", "file ", "hexdump ", "strings ")
 
+_DESTRUCTIVE_BASH_SIGNALS = ("-delete", "os.remove", "os.unlink", "shutil.rmtree",
+                              "unlink(", "rmdir(", "> /")
+
 
 def _is_bash_read_only(payload: dict) -> bool:
     cmd = (payload.get("command") or "").lstrip()
+    # find with -delete is destructive despite starting with "find"
+    if any(sig in cmd for sig in _DESTRUCTIVE_BASH_SIGNALS):
+        return False
     return any(cmd.startswith(r) for r in _READ_ONLY_BASH)
 
 
@@ -156,6 +162,9 @@ def _check_glba(ctx: DataContext, action_type: str) -> ConstraintResult:
     """GLBA Safeguards Rule: financial records require documented disposal procedures."""
     if not ctx.contains_financial:
         return ConstraintResult("GLBA", Verdict.PERMIT, "GLBA not applicable (no financial data).")
+    if ctx.data_type == "credit":
+        return ConstraintResult("GLBA", Verdict.PERMIT,
+                                "GLBA defers to FCRA for consumer credit report data (lex specialis).")
 
     if not ctx.is_backed_up:
         return ConstraintResult(
@@ -365,8 +374,10 @@ def infer_context(path: str, description: str = "") -> DataContext:
     """
     import re as _re
 
-    # Extract file paths from bash commands (cat, cp, mv, rm, grep, awk, etc.)
-    path_tokens = _re.findall(r"(?:^|\s)([/~][^\s;|&>]+)", path)
+    # Extract file paths from bash commands (cat, cp, mv, rm, grep, find, python, etc.)
+    # Also catch python os.remove / open() calls
+    path_tokens = _re.findall(r"(?:^|\s)([/~][^\s;|&>'\"]+)", path)
+    path_tokens += _re.findall(r"['\"]([/~][^'\"]+)['\"]", path)
     all_paths = [path] + path_tokens
 
     combined = " ".join(all_paths).lower() + " " + description.lower()
@@ -385,7 +396,10 @@ def infer_context(path: str, description: str = "") -> DataContext:
                    "/var/log", "application.log", "error.log", "audit.jsonl")
     _PII_KW     = ("pii", "customer", "email", "ssn", "social_security", "dob",
                    "date_of_birth", "address", "personal", "passport", "driver_license",
-                   "phone", "zipcode", "users/", "user_data", "profile", "identity")
+                   "phone", "zipcode", "users/", "user_data", "profile", "identity",
+                   "contact", "contacts", "marketing", "gdpr", "ccpa", "lgpd", "pipl",
+                   "pipeda", "consumer", "subscriber", "member",
+                   "/users/", "/users.", "/customers/", "/customers.", "/members/", "/members.")
 
     data_type = (
         "health"     if any(k in combined for k in _HEALTH_KW) else
@@ -398,6 +412,7 @@ def infer_context(path: str, description: str = "") -> DataContext:
 
     # ── Jurisdiction detection ────────────────────────────────────────────────
     _EU_KW   = ("gdpr", "/eu/", "/europe/", ".de/", ".fr/", ".nl/", ".ie/", ".es/",
+                "/de/", "/fr/", "/nl/", "/ie/", "/es/", "/it/", "/pt/",
                 "european", "dsgvo", "rgpd")
     _CA_KW   = ("ccpa", "/california/", "/ca/", "california")
     _BR_KW   = ("lgpd", "/brazil/", "/br/", "brasil", "brazil")

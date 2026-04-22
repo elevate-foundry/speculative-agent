@@ -34,19 +34,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Install pandoc and tectonic
-        run: |
-          sudo apt-get install -y pandoc
-          curl --proto '=https' --tlsv1.2 -fsSL \
-            https://drop.rizin.re/tectonic/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Cache tectonic package bundle
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/Tectonic
-          key: tectonic-${{ hashFiles('paper/main.tex') }}
-          restore-keys: tectonic-
+      - name: Install pandoc
+        run: sudo apt-get install -y pandoc
 
       - name: Run eval suite — patch paper + generate eval page
         run: python eval_suite.py --quiet --html --patch-paper
@@ -55,16 +44,11 @@ jobs:
         run: make html
         working-directory: paper
 
-      - name: Build paper PDF
-        run: tectonic main.tex
-        working-directory: paper
-
       - name: Assemble site
         run: |
           mkdir -p _site/eval
           cp paper/main.html _site/index.html
           cp paper/style.css _site/style.css
-          cp paper/main.pdf  _site/paper.pdf
           cp eval/index.html _site/eval/index.html
 
       - name: Upload Pages artifact

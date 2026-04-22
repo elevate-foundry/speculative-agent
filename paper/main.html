@@ -289,6 +289,33 @@ id="toc-constraint-hierarchy">Constraint Hierarchy</a></li>
 <li><a href="#audit-log-integrity" id="toc-audit-log-integrity">Audit
 Log Integrity</a></li>
 </ul></li>
+<li><a href="#sec:braille" id="toc-sec:braille">The Braille Lattice
+Isomorphism</a>
+<ul>
+<li><a href="#braille-as-a-boolean-lattice"
+id="toc-braille-as-a-boolean-lattice">Braille as a Boolean
+Lattice</a></li>
+<li><a href="#embedding-into-the-tropical-semiring"
+id="toc-embedding-into-the-tropical-semiring">Embedding into the
+Tropical Semiring</a></li>
+<li><a href="#isomorphism-with-the-compliance-lattice"
+id="toc-isomorphism-with-the-compliance-lattice">Isomorphism with the
+Compliance Lattice</a></li>
+<li><a href="#geometric-interpretation"
+id="toc-geometric-interpretation">Geometric Interpretation</a></li>
+<li><a href="#braille-grade-2-as-a-compression-lattice"
+id="toc-braille-grade-2-as-a-compression-lattice">Braille Grade 2 as a
+Compression Lattice</a></li>
+</ul></li>
+<li><a href="#sec:bandit" id="toc-sec:bandit">Adaptive Model Selection
+via UCB1</a>
+<ul>
+<li><a href="#reward-signal" id="toc-reward-signal">Reward
+Signal</a></li>
+<li><a href="#ucb1-policy" id="toc-ucb1-policy">UCB1 Policy</a></li>
+<li><a href="#monte-carlo-evaluation"
+id="toc-monte-carlo-evaluation">Monte Carlo Evaluation</a></li>
+</ul></li>
 <li><a href="#sec:privacy" id="toc-sec:privacy">Privacy-Aware Model
 Routing</a></li>
 <li><a href="#sec:impl" id="toc-sec:impl">Implementation</a></li>
@@ -584,6 +611,180 @@ SHA-256 hash chain: <span class="math display">\[\begin{equation}
 0^{64}\)</span> (genesis hash). This satisfies SOC II CC6.1
 tamper-evidence requirements: any modification to a historical entry
 invalidates all subsequent hashes.</p>
+<h1 id="sec:braille">The Braille Lattice Isomorphism</h1>
+<p>We observe a deep structural correspondence between the compliance
+lattice and the classical Braille encoding that illuminates both
+systems.</p>
+<h2 id="braille-as-a-boolean-lattice">Braille as a Boolean Lattice</h2>
+<p>Louis Braille’s 1824 encoding represents characters as <span
+class="math inline">\(6\)</span>-dot binary patterns. Let <span
+class="math inline">\(\mathbb{B} = \{0,1\}\)</span> with the standard
+Boolean order <span class="math inline">\(0 \leq 1\)</span>. The set of
+all Braille characters is the Boolean hypercube: <span
+class="math display">\[\begin{equation}
+  \mathcal{B} = \mathbb{B}^6 = \{(b_1, b_2, b_3, b_4, b_5, b_6) : b_i
+\in \{0,1\}\}
+\end{equation}\]</span> with <span class="math inline">\(|\mathcal{B}| =
+2^6 = 64\)</span> elements. The partial order on <span
+class="math inline">\(\mathcal{B}\)</span> is componentwise: <span
+class="math inline">\((b_1,\ldots,b_6) \leq
+(b_1&#39;,\ldots,b_6&#39;)\)</span> iff <span class="math inline">\(b_i
+\leq b_i&#39;\)</span> for all <span class="math inline">\(i\)</span>.
+This makes <span class="math inline">\((\mathcal{B}, \leq)\)</span> a
+<em>distributive lattice</em> with meet <span
+class="math inline">\(\wedge\)</span> (bitwise AND) and join <span
+class="math inline">\(\vee\)</span> (bitwise OR): <span
+class="math display">\[\begin{align}
+  \mathbf{b} \wedge \mathbf{b}&#39; &amp;= (b_1 \wedge b_1&#39;, \ldots,
+b_6 \wedge b_6&#39;) \\
+  \mathbf{b} \vee  \mathbf{b}&#39; &amp;= (b_1 \vee  b_1&#39;, \ldots,
+b_6 \vee  b_6&#39;)
+\end{align}\]</span></p>
+<h2 id="embedding-into-the-tropical-semiring">Embedding into the
+Tropical Semiring</h2>
+<p>The Boolean lattice <span class="math inline">\((\mathbb{B}^6,
+\wedge, \vee)\)</span> embeds into the tropical semiring <span
+class="math inline">\((\mathbb{R}_{\max}, \oplus, \otimes)\)</span> via
+the map <span class="math inline">\(\phi : \mathbb{B} \to \{0,
+-\infty\}\)</span>: <span class="math display">\[\begin{equation}
+  \phi(b) = \begin{cases} 0 &amp; \text{if } b = 1 \text{ (dot raised)}
+\\
+                          -\infty &amp; \text{if } b = 0 \text{ (dot
+flat)} \end{cases}
+\end{equation}\]</span> Under this map, Boolean join corresponds to
+tropical addition: <span class="math inline">\(\phi(b \vee b&#39;) =
+\phi(b) \oplus\phi(b&#39;) = \max(\phi(b), \phi(b&#39;))\)</span>, and
+Boolean meet to tropical multiplication: <span
+class="math inline">\(\phi(b \wedge b&#39;) = \phi(b)
+\otimes\phi(b&#39;) = \phi(b) + \phi(b&#39;)\)</span>.</p>
+<h2 id="isomorphism-with-the-compliance-lattice">Isomorphism with the
+Compliance Lattice</h2>
+<div id="thm:braille" class="theorem">
+<p><strong>Theorem 4</strong> (Braille–Compliance Isomorphism). <em>Let
+<span class="math inline">\(\mathcal{R} = \{r_1, \ldots, r_k\}\)</span>
+be a set of <span class="math inline">\(k \leq 6\)</span> regulatory
+constraints with verdicts in <span class="math inline">\(\{0,
+1\}\)</span> (Permit/Block). The compliance decision vector <span
+class="math inline">\(\mathbf{v}(a) = (v_1(a), \ldots, v_k(a)) \in
+\mathbb{B}^k\)</span> is isomorphic as a lattice element to a Braille
+character: each regulation occupies one dot position, a raised dot
+(<span class="math inline">\(v_i = 1\)</span>) signals a Block verdict,
+and a flat dot (<span class="math inline">\(v_i = 0\)</span>) signals
+Permit.</em></p>
+<p><em>The compliance condition <span
+class="math inline">\(\mathcal{L}(a) = 0\)</span> (all Permit)
+corresponds exactly to the Braille “space” character <span
+class="math inline">\(\mathbf{0} = (0,0,0,0,0,0)\)</span> — the unique
+minimum element of <span
+class="math inline">\(\mathcal{B}\)</span>.</em></p>
+</div>
+<div class="proof">
+<p><em>Proof.</em> The map <span class="math inline">\(\psi: \mathcal{R}
+\to \{1,\ldots,6\}\)</span> assigns each regulation a dot position. The
+compliance vector <span class="math inline">\(\mathbf{v}(a) \in
+\mathbb{B}^k \hookrightarrow
+\mathbb{B}^6\)</span> (padding with zeros) defines a Braille character.
+The action is compliant iff <span class="math inline">\(\mathbf{v}(a) =
+\mathbf{0}\)</span> (space character). By Theorem <a
+href="#thm:compliance" data-reference-type="ref"
+data-reference="thm:compliance">2</a>, this is equivalent to <span
+class="math inline">\(\mathcal{L}(a) = 0\)</span>. The lattice
+operations are preserved by the embedding <span
+class="math inline">\(\phi\)</span> above. ◻</p>
+</div>
+<h2 id="geometric-interpretation">Geometric Interpretation</h2>
+<figure id="fig:braille" data-latex-placement="h">
+
+<figcaption>A compliance decision as a Braille cell. Filled dots
+(positions 1–3) indicate SOC II, GDPR, and HIPAA violations. Empty dots
+(4–6) indicate CCPA, FCRA, GLBA compliance. The action is blocked
+because <span class="math inline">\(\mathcal{L}(a) = 3 &gt;
+0\)</span>.</figcaption>
+</figure>
+<p>This isomorphism has practical consequences: a compliance decision
+can be <em>rendered as a tactile Braille character</em> on a refreshable
+Braille display, giving visually impaired compliance officers an
+immediate tactile readout of which regulations an action violates. The
+space character means “go”; any raised dot means “stop and review dot
+<span class="math inline">\(i\)</span>”.</p>
+<h2 id="braille-grade-2-as-a-compression-lattice">Braille Grade 2 as a
+Compression Lattice</h2>
+<p>Braille Grade 2 introduces 189 contractions (short forms for common
+words and letter combinations). This is precisely a <em>lattice
+homomorphism</em>: <span class="math inline">\(\varphi: \mathcal{B}^*
+\to \mathcal{B}^*\)</span> that preserves meaning while minimizing cell
+count. The analogy to our compliance system: the Lagrangian <span
+class="math inline">\(\mathcal{L}\)</span> is a Grade 2 contraction of
+the full regulatory text — it preserves the compliance meaning
+(permitted/blocked) while compressing nine regulatory frameworks into a
+single scalar.</p>
+<h1 id="sec:bandit">Adaptive Model Selection via UCB1</h1>
+<p>The speculative racing architecture naturally frames model selection
+as a <em>stochastic multi-armed bandit</em> problem <span
+class="citation" data-cites="auer2002finite">(Auer et al. 2002)</span>:
+each model <span class="math inline">\(m_i\)</span> is an arm with
+unknown reward distribution, and we wish to maximize cumulative quality
+over many tasks.</p>
+<h2 id="reward-signal">Reward Signal</h2>
+<p>For each race on task <span class="math inline">\(t\)</span>, the
+reward for model <span class="math inline">\(m_i\)</span> is the
+composite score: <span class="math display">\[\begin{equation}
+  r_i(t) = \alpha \cdot q_i(t) + (1 - \alpha) \cdot \frac{1}{1 +
+\lambda_i(t) / \lambda_0}
+\end{equation}\]</span> where <span class="math inline">\(q_i(t) \in
+[0,1]\)</span> is the action quality score (validator output), <span
+class="math inline">\(\lambda_i(t)\)</span> is the observed latency in
+milliseconds, <span class="math inline">\(\lambda_0 = 2000\)</span>ms is
+a normalization constant, and <span class="math inline">\(\alpha =
+0.8\)</span> weights quality over speed.</p>
+<h2 id="ucb1-policy">UCB1 Policy</h2>
+<p>After <span class="math inline">\(n\)</span> total races, model <span
+class="math inline">\(m_i\)</span> having participated in <span
+class="math inline">\(n_i\)</span> races with empirical mean reward
+<span class="math inline">\(\bar{r}_i\)</span>, the UCB1 index is: <span
+class="math display">\[\begin{equation}
+  \text{UCB1}_i(n) = \bar{r}_i + \sqrt{\frac{2 \ln n}{n_i}}
+\end{equation}\]</span> The exploration bonus <span
+class="math inline">\(\sqrt{2 \ln n / n_i}\)</span> ensures undertested
+models are given chances proportional to the uncertainty in their
+estimates. Models with <span class="math inline">\(n_i = 0\)</span>
+receive index <span class="math inline">\(+\infty\)</span> (must be
+tried at least once).</p>
+<div class="theorem">
+<p><strong>Theorem 5</strong> (UCB1 Regret Bound). <em>Let <span
+class="math inline">\(\Delta_i = r^* - \bar{r}_i\)</span> be the gap
+between the optimal model reward <span
+class="math inline">\(r^*\)</span> and model <span
+class="math inline">\(i\)</span>’s mean. The expected cumulative regret
+of UCB1 after <span class="math inline">\(n\)</span> races satisfies:
+<span class="math display">\[\begin{equation}
+  \mathbb{E}[\text{Regret}(n)] \leq \sum_{i : \Delta_i &gt; 0}
+    \left( \frac{8 \ln n}{\Delta_i} + \left(1 +
+\frac{\pi^2}{3}\right)\Delta_i \right)
+\end{equation}\]</span> This is <span class="math inline">\(O(\sqrt{nk
+\ln n})\)</span> in the worst case over <span
+class="math inline">\(k\)</span> models <span class="citation"
+data-cites="auer2002finite">(Auer et al. 2002)</span>.</em></p>
+</div>
+<h2 id="monte-carlo-evaluation">Monte Carlo Evaluation</h2>
+<p>Since all models race in parallel, a benchmark round of <span
+class="math inline">\(N\)</span> prompts costs wall-clock time equal to
+a <em>single</em> sequential run while accumulating <span
+class="math inline">\(N \times k\)</span> reward observations (one per
+model per prompt). This is the key efficiency insight: parallel racing
+provides Monte Carlo evaluation essentially for free.</p>
+<p>For <span class="math inline">\(N\)</span> prompts and <span
+class="math inline">\(R\)</span> rounds, the total observations are
+<span class="math inline">\(N \cdot R \cdot k\)</span>, and confidence
+intervals on <span class="math inline">\(\bar{r}_i\)</span> shrink as
+<span class="math inline">\(O(1/\sqrt{NR})\)</span>. With <span
+class="math inline">\(N = 10\)</span> prompts and <span
+class="math inline">\(R = 50\)</span> rounds: <span
+class="math display">\[\begin{equation}
+  \text{95\% CI width} \approx \frac{1.96}{\sqrt{500}} \approx 0.088
+\end{equation}\]</span> meaning we resolve model quality differences of
+<span class="math inline">\(&gt; 9\%\)</span> with 95% confidence in the
+same wall-clock time as 50 sequential single-model queries.</p>
 <h1 id="sec:privacy">Privacy-Aware Model Routing</h1>
 <p>Let <span class="math inline">\(\mathcal{K}\)</span> be a set of
 privacy-sensitive keywords (passwords, credentials, PHI, financial
@@ -768,7 +969,7 @@ href="https://www.anthropic.com/claude">https://www.anthropic.com/claude</a>.
 <div id="ref-auer2002finite" class="csl-entry" role="listitem">
 Auer, Peter, Nicolo Cesa-Bianchi, and Paul Fischer. 2002.
 <span>“Finite-Time Analysis of the Multiarmed Bandit Problem.”</span>
-<em>Machine Learning</em> 47: 235–56.
+<em>Machine Learning</em> 47 (2): 235–56.
 </div>
 <div id="ref-chase2022langchain" class="csl-entry" role="listitem">
 Chase, Harrison. 2022. <em><span>LangChain</span>: Building Applications

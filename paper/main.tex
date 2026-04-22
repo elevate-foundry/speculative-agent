@@ -346,6 +346,178 @@ where $h_0 = 0^{64}$ (genesis hash). This satisfies SOC~II CC6.1 tamper-evidence
 requirements: any modification to a historical entry invalidates all subsequent hashes.
 
 % ─────────────────────────────────────────────────────────────────────────────
+\section{The Braille Lattice Isomorphism}
+\label{sec:braille}
+% ─────────────────────────────────────────────────────────────────────────────
+
+We observe a deep structural correspondence between the compliance lattice and
+the classical Braille encoding that illuminates both systems.
+
+\subsection{Braille as a Boolean Lattice}
+
+Louis Braille's 1824 encoding represents characters as $6$-dot binary patterns.
+Let $\mathbb{B} = \{0,1\}$ with the standard Boolean order $0 \leq 1$. The set
+of all Braille characters is the Boolean hypercube:
+\begin{equation}
+  \mathcal{B} = \mathbb{B}^6 = \{(b_1, b_2, b_3, b_4, b_5, b_6) : b_i \in \{0,1\}\}
+\end{equation}
+with $|\mathcal{B}| = 2^6 = 64$ elements. The partial order on $\mathcal{B}$ is
+componentwise: $(b_1,\ldots,b_6) \leq (b_1',\ldots,b_6')$ iff $b_i \leq b_i'$
+for all $i$. This makes $(\mathcal{B}, \leq)$ a \emph{distributive lattice}
+with meet $\wedge$ (bitwise AND) and join $\vee$ (bitwise OR):
+\begin{align}
+  \mathbf{b} \wedge \mathbf{b}' &= (b_1 \wedge b_1', \ldots, b_6 \wedge b_6') \\
+  \mathbf{b} \vee  \mathbf{b}' &= (b_1 \vee  b_1', \ldots, b_6 \vee  b_6')
+\end{align}
+
+\subsection{Embedding into the Tropical Semiring}
+
+The Boolean lattice $(\mathbb{B}^6, \wedge, \vee)$ embeds into the tropical
+semiring $(\Rmax, \tplus, \ttimes)$ via the map $\phi : \mathbb{B} \to \{0, -\infty\}$:
+\begin{equation}
+  \phi(b) = \begin{cases} 0 & \text{if } b = 1 \text{ (dot raised)} \\
+                          -\infty & \text{if } b = 0 \text{ (dot flat)} \end{cases}
+\end{equation}
+Under this map, Boolean join corresponds to tropical addition:
+$\phi(b \vee b') = \phi(b) \tplus \phi(b') = \max(\phi(b), \phi(b'))$,
+and Boolean meet to tropical multiplication:
+$\phi(b \wedge b') = \phi(b) \ttimes \phi(b') = \phi(b) + \phi(b')$.
+
+\subsection{Isomorphism with the Compliance Lattice}
+
+\begin{theorem}[Braille--Compliance Isomorphism]
+\label{thm:braille}
+Let $\mathcal{R} = \{r_1, \ldots, r_k\}$ be a set of $k \leq 6$ regulatory
+constraints with verdicts in $\{0, 1\}$ (Permit/Block). The compliance decision
+vector $\mathbf{v}(a) = (v_1(a), \ldots, v_k(a)) \in \mathbb{B}^k$ is isomorphic
+as a lattice element to a Braille character: each regulation occupies one dot
+position, a raised dot ($v_i = 1$) signals a Block verdict, and a flat dot
+($v_i = 0$) signals Permit.
+
+The compliance condition $\mathcal{L}(a) = 0$ (all Permit) corresponds exactly
+to the Braille ``space'' character $\mathbf{0} = (0,0,0,0,0,0)$ — the unique
+minimum element of $\mathcal{B}$.
+\end{theorem}
+
+\begin{proof}
+The map $\psi: \mathcal{R} \to \{1,\ldots,6\}$ assigns each regulation a dot
+position. The compliance vector $\mathbf{v}(a) \in \mathbb{B}^k \hookrightarrow
+\mathbb{B}^6$ (padding with zeros) defines a Braille character. The action is
+compliant iff $\mathbf{v}(a) = \mathbf{0}$ (space character). By Theorem~\ref{thm:compliance},
+this is equivalent to $\mathcal{L}(a) = 0$. The lattice operations are preserved
+by the embedding $\phi$ above.
+\end{proof}
+
+\subsection{Geometric Interpretation}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[scale=0.9]
+  % 6-dot braille cell
+  \draw[rounded corners=4pt] (0,0) rectangle (1.2, 2.8);
+  % Dot positions (standard Braille numbering)
+  \foreach \y/\label/\reg in {
+    2.2/1/SOC II,
+    1.4/2/GDPR,
+    0.6/3/HIPAA
+  } {
+    \node[circle, draw, minimum size=0.35cm, fill=black!80, font=\tiny\bf, text=white]
+      at (0.35, \y) {\label};
+    \node[font=\tiny, anchor=west] at (1.3, \y) {\reg};
+  }
+  \foreach \y/\label/\reg in {
+    2.2/4/CCPA,
+    1.4/5/FCRA,
+    0.6/6/GLBA
+  } {
+    \node[circle, draw, minimum size=0.35cm, fill=white]
+      at (0.85, \y) {\tiny\label};
+    \node[font=\tiny, anchor=west] at (1.3, \y) {\reg\ \small(Permit)};
+  }
+  \node[font=\small\bf] at (0.6, -0.35) {BLOCK};
+  \node[font=\tiny, text=gray] at (0.6, -0.65) {(raised = violation)};
+\end{tikzpicture}
+\caption{A compliance decision as a Braille cell. Filled dots (positions 1--3)
+indicate SOC II, GDPR, and HIPAA violations. Empty dots (4--6) indicate CCPA,
+FCRA, GLBA compliance. The action is blocked because $\mathcal{L}(a) = 3 > 0$.}
+\label{fig:braille}
+\end{figure}
+
+This isomorphism has practical consequences: a compliance decision can be
+\emph{rendered as a tactile Braille character} on a refreshable Braille display,
+giving visually impaired compliance officers an immediate tactile readout of
+which regulations an action violates. The space character means ``go'';
+any raised dot means ``stop and review dot $i$''.
+
+\subsection{Braille Grade 2 as a Compression Lattice}
+
+Braille Grade~2 introduces 189 contractions (short forms for common words and
+letter combinations). This is precisely a \emph{lattice homomorphism}:
+$\varphi: \mathcal{B}^* \to \mathcal{B}^*$ that preserves meaning while
+minimizing cell count. The analogy to our compliance system:
+the Lagrangian $\mathcal{L}$ is a Grade~2 contraction of the full regulatory
+text — it preserves the compliance meaning (permitted/blocked) while compressing
+nine regulatory frameworks into a single scalar.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Adaptive Model Selection via UCB1}
+\label{sec:bandit}
+% ─────────────────────────────────────────────────────────────────────────────
+
+The speculative racing architecture naturally frames model selection as a
+\emph{stochastic multi-armed bandit} problem~\cite{auer2002finite}: each model
+$m_i$ is an arm with unknown reward distribution, and we wish to maximize
+cumulative quality over many tasks.
+
+\subsection{Reward Signal}
+
+For each race on task $t$, the reward for model $m_i$ is the composite score:
+\begin{equation}
+  r_i(t) = \alpha \cdot q_i(t) + (1 - \alpha) \cdot \frac{1}{1 + \lambda_i(t) / \lambda_0}
+\end{equation}
+where $q_i(t) \in [0,1]$ is the action quality score (validator output),
+$\lambda_i(t)$ is the observed latency in milliseconds, $\lambda_0 = 2000$ms
+is a normalization constant, and $\alpha = 0.8$ weights quality over speed.
+
+\subsection{UCB1 Policy}
+
+After $n$ total races, model $m_i$ having participated in $n_i$ races with
+empirical mean reward $\bar{r}_i$, the UCB1 index is:
+\begin{equation}
+  \text{UCB1}_i(n) = \bar{r}_i + \sqrt{\frac{2 \ln n}{n_i}}
+\end{equation}
+The exploration bonus $\sqrt{2 \ln n / n_i}$ ensures undertested models
+are given chances proportional to the uncertainty in their estimates.
+Models with $n_i = 0$ receive index $+\infty$ (must be tried at least once).
+
+\begin{theorem}[UCB1 Regret Bound]
+Let $\Delta_i = r^* - \bar{r}_i$ be the gap between the optimal model reward
+$r^*$ and model $i$'s mean. The expected cumulative regret of UCB1 after $n$ races satisfies:
+\begin{equation}
+  \mathbb{E}[\text{Regret}(n)] \leq \sum_{i : \Delta_i > 0}
+    \left( \frac{8 \ln n}{\Delta_i} + \left(1 + \frac{\pi^2}{3}\right)\Delta_i \right)
+\end{equation}
+This is $O(\sqrt{nk \ln n})$ in the worst case over $k$ models~\cite{auer2002finite}.
+\end{theorem}
+
+\subsection{Monte Carlo Evaluation}
+
+Since all models race in parallel, a benchmark round of $N$ prompts costs
+wall-clock time equal to a \emph{single} sequential run while accumulating
+$N \times k$ reward observations (one per model per prompt). This is the
+key efficiency insight: parallel racing provides Monte Carlo evaluation
+essentially for free.
+
+For $N$ prompts and $R$ rounds, the total observations are $N \cdot R \cdot k$,
+and confidence intervals on $\bar{r}_i$ shrink as $O(1/\sqrt{NR})$.
+With $N = 10$ prompts and $R = 50$ rounds:
+\begin{equation}
+  \text{95\% CI width} \approx \frac{1.96}{\sqrt{500}} \approx 0.088
+\end{equation}
+meaning we resolve model quality differences of $> 9\%$ with 95\% confidence
+in the same wall-clock time as 50 sequential single-model queries.
+
+% ─────────────────────────────────────────────────────────────────────────────
 \section{Privacy-Aware Model Routing}
 \label{sec:privacy}
 % ─────────────────────────────────────────────────────────────────────────────

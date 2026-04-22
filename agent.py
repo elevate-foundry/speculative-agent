@@ -196,6 +196,35 @@ class Agent:
                 print(f"[agent] Task classifier: tier={tier!r} — upgrading model pool...")
             active_models = await self._models_for_tier(tier)
 
+        # Pre-flight: let models choose their own autonomy level (capped by user config)
+        import executor as _exe
+        _configured_autonomy = _exe.AUTONOMY
+        try:
+            from preflight import preflight_assess
+            pf = await preflight_assess(
+                task=task,
+                models=active_models,
+                configured_autonomy=_configured_autonomy,
+                verbose=self.verbose,
+            )
+            # Temporarily override autonomy for this task
+            _exe.AUTONOMY = pf.effective_autonomy
+            os.environ["AGENT_AUTONOMY"] = pf.effective_autonomy
+
+            # If risk is critical and we're in full autonomy, halt and ask user
+            if pf.risk_level == "critical" and _configured_autonomy == "full":
+                print(f"\n[preflight] 🚨 CRITICAL RISK — halting autonomous execution.")
+                print(f"[preflight] {pf.justification}")
+                confirm = input("Proceed anyway? [y/N] ").strip().lower()
+                if confirm != "y":
+                    print("[agent] Task cancelled by preflight safety check.")
+                    _exe.AUTONOMY = _configured_autonomy
+                    os.environ["AGENT_AUTONOMY"] = _configured_autonomy
+                    return None
+        except Exception as _pf_err:
+            if self.verbose:
+                print(f"[preflight] skipped ({_pf_err})")
+
         last_result: Optional[ActionResult] = None
         consecutive_failures = 0
         last_action_sig: Optional[str] = None
@@ -368,6 +397,14 @@ class Agent:
 
         else:
             print(f"\n[agent] Reached max steps ({max_steps}). Pipeline stopped.")
+
+        # Restore configured autonomy (preflight may have lowered it for this task)
+        try:
+            import executor as _exe2
+            _exe2.AUTONOMY = _configured_autonomy
+            os.environ["AGENT_AUTONOMY"] = _configured_autonomy
+        except Exception:
+            pass
 
         return last_result
 

@@ -160,6 +160,7 @@ async def _stream_openrouter(
     color: str,
     live_output: bool,
     screenshot_b64: Optional[str] = None,
+    max_tokens: int = 1024,
 ) -> None:
     import httpx
     import json as _json
@@ -183,7 +184,7 @@ async def _stream_openrouter(
             {"role": "user",   "content": user_content},
         ],
         "stream": True,
-        "max_tokens": 512,
+        "max_tokens": max_tokens,
         "temperature": 0.3,
     }
     headers = {
@@ -256,7 +257,7 @@ async def _stream_direct(
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_content}],
             "stream": True,
-            "max_tokens": 1024,
+            "max_tokens": max_tokens,
         }
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream(
@@ -310,7 +311,7 @@ async def _stream_direct(
             {"role": "user",   "content": user_content},
         ],
         "stream": True,
-        "max_tokens": 1024,
+        "max_tokens": max_tokens,
         "temperature": 0.3,
     }
 
@@ -354,6 +355,7 @@ async def stream_model(
     live_output: bool = True,
     screenshot_b64: Optional[str] = None,
     provider_config: object = None,
+    max_tokens: int = 1024,
 ) -> None:
     label = _model_label(model_name, stream_obj.provider)
     color = _MODEL_COLORS.get(model_name, "")
@@ -371,11 +373,13 @@ async def stream_model(
         if provider_config is not None:
             await _stream_direct(model_name, prompt, system_prompt,
                                  stream_obj, cancel_event, color, live_output,
-                                 provider_config, screenshot_b64=screenshot_b64)
+                                 provider_config, screenshot_b64=screenshot_b64,
+                                 max_tokens=max_tokens)
         elif stream_obj.provider == "openrouter":
             await _stream_openrouter(model_name, prompt, system_prompt,
                                      stream_obj, cancel_event, color, live_output,
-                                     screenshot_b64=screenshot_b64)
+                                     screenshot_b64=screenshot_b64,
+                                     max_tokens=max_tokens)
         else:
             await _stream_ollama(model_name, prompt, system_prompt,
                                  stream_obj, cancel_event, ollama_base, color, live_output)
@@ -408,6 +412,7 @@ async def supervise_race(
     verbose: bool = True,
     live_output: bool = True,
     screenshot_b64: Optional[str] = None,
+    max_tokens: int = 1024,
 ) -> tuple[Optional[Action], list[ModelStream]]:
     """
     Run all models in parallel. Monitor streams. Short-circuit if any
@@ -431,8 +436,8 @@ async def supervise_race(
         m.name: asyncio.create_task(
             stream_model(m.name, prompt, streams[m.name], cancel_event, ollama_base, system_prompt,
                          live_output=live_output, screenshot_b64=screenshot_b64,
-                         provider_config=getattr(m, "provider_config", None))
-        )
+                         provider_config=getattr(m, "provider_config", None),
+                         max_tokens=max_tokens))
         for m in models_info
     }
 

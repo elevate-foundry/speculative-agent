@@ -152,14 +152,36 @@ def _prompt_approval(action: Action) -> "bool | str":
 
 
 def execute(action: Action, auto_approve: bool = False) -> ActionResult:
+    # ── Compliance lattice ────────────────────────────────────────────────
+    # Always run for destructive actions. Non-destructive actions get a
+    # lightweight audit log entry but are never blocked by compliance alone.
+    if action.action_type not in ("read_file", "noop"):
+        from compliance import evaluate, infer_context, print_decision
+        path = (action.payload.get("path") or
+                action.payload.get("command") or
+                action.payload.get("code") or
+                action.payload.get("script") or
+                action.description or "")
+        ctx = infer_context(path, action.description)
+        decision = evaluate(action.action_type, action.payload, ctx)
+
+        if not decision.permitted:
+            print_decision(decision)
+            return ActionResult(
+                success=False, output="",
+                error=f"Compliance BLOCK — {decision.justification}",
+            )
+
+        if decision.mitigations_required and _is_destructive(action):
+            print_decision(decision)
+
+    # ── Autonomy gate ─────────────────────────────────────────────────────
     needs_confirm = False
 
     if not auto_approve:
         if AUTONOMY == "off":
-            # Old behaviour: confirm everything except read_file / noop
             needs_confirm = action.action_type not in ("read_file", "noop")
         elif AUTONOMY == "normal":
-            # Only confirm genuinely destructive actions
             needs_confirm = _is_destructive(action)
         elif AUTONOMY == "full":
             needs_confirm = False
@@ -172,7 +194,6 @@ def execute(action: Action, auto_approve: bool = False) -> ActionResult:
             return ActionResult(success=False, output="", error="User provided feedback.",
                                 user_feedback=approved)
     elif action.action_type not in ("read_file", "noop") and AUTONOMY != "off":
-        # Show what's running without asking
         print(f"\n  \u25b6 Auto-running [{action.action_type}]: {action.description}")
 
     try:

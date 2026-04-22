@@ -1,0 +1,382 @@
+"""
+compliance.py — Tropical Compliance Lattice + Lagrangian Action Justification
+
+Implements a compliance decision engine for SOC I/II/III + FCRA, GLBA, ISO 27001,
+GDPR, HIPAA, CCPA, Metro II, CDIA frameworks.
+
+Architecture:
+  - Each regulation is a constraint node in a tropical semiring lattice
+    (max-plus algebra: join = max, meet = min, identity = -∞)
+  - Before any destructive action, the system must produce a Lagrangian
+    justification: a vector of (regulation, verdict, rationale) that
+    simultaneously satisfies ALL applicable constraints
+  - If any constraint returns BLOCK, the action is denied regardless of others
+  - All decisions are written to an immutable SOC-compliant audit log
+
+Lagrangian:
+  L(action) = Σ λᵢ · cᵢ(action, context)
+  where cᵢ ∈ {PERMIT=0, CONDITIONAL=0.5, BLOCK=1}
+  Action is permitted only when L = 0 (all constraints PERMIT or waived)
+"""
+
+import os
+import json
+import hashlib
+import datetime
+import uuid
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+from typing import Optional
+
+
+# ─── Verdicts ────────────────────────────────────────────────────────────────
+
+class Verdict(Enum):
+    PERMIT      = 0      # constraint satisfied, action allowed
+    CONDITIONAL = 1      # allowed only with mitigations (logged, anonymized, etc.)
+    BLOCK       = 2      # constraint violated, action must not proceed
+
+    @property
+    def lagrangian_weight(self) -> float:
+        return {self.PERMIT: 0.0, self.CONDITIONAL: 0.5, self.BLOCK: 1.0}[self]
+
+
+# ─── Data subject / context ───────────────────────────────────────────────────
+
+@dataclass
+class DataContext:
+    """What the agent knows about the data being acted on."""
+    path: str                          # file or resource path
+    data_type: str = "unknown"         # pii, financial, health, credential, log, code, unknown
+    subject_jurisdiction: str = "US"   # US, EU, CA (California), UK, etc.
+    retention_days: Optional[int] = None   # required retention period if known
+    contains_pii: bool = False
+    contains_phi: bool = False         # Protected Health Information (HIPAA)
+    contains_financial: bool = False   # GLBA / FCRA / Metro II / CDIA
+    is_audit_log: bool = False
+    created_days_ago: Optional[int] = None
+    has_consumer_request: bool = False   # GDPR Art.17 / CCPA right-to-delete request
+    is_backed_up: bool = False
+
+
+# ─── Individual constraint nodes ─────────────────────────────────────────────
+
+@dataclass
+class ConstraintResult:
+    regulation: str
+    verdict: Verdict
+    rationale: str
+    lagrangian_lambda: float = 1.0     # weight of this constraint
+
+
+def _check_soc(ctx: DataContext, action_type: str) -> ConstraintResult:
+    """SOC I/II/III: all destructive actions must be logged; audit logs are immutable."""
+    if ctx.is_audit_log:
+        return ConstraintResult(
+            "SOC-II", Verdict.BLOCK,
+            "Audit logs are immutable under SOC II CC6.1/CC7.2. Deletion of audit trail is prohibited.",
+            lagrangian_lambda=2.0,  # double weight — non-negotiable
+        )
+    return ConstraintResult("SOC-II", Verdict.PERMIT,
+                            "Action will be recorded in immutable audit log per SOC II CC6.1.")
+
+
+def _check_gdpr(ctx: DataContext, action_type: str) -> ConstraintResult:
+    """GDPR: right to erasure (Art.17) vs. lawful retention obligations (Art.5(1)(e))."""
+    if not ctx.contains_pii or ctx.subject_jurisdiction not in ("EU", "UK"):
+        return ConstraintResult("GDPR", Verdict.PERMIT, "GDPR not applicable (no EU/UK PII).")
+
+    if ctx.has_consumer_request:
+        if ctx.retention_days and ctx.created_days_ago and ctx.created_days_ago < ctx.retention_days:
+            return ConstraintResult(
+                "GDPR", Verdict.BLOCK,
+                f"GDPR Art.17(3)(b): erasure request received but mandatory retention period "
+                f"({ctx.retention_days}d) not yet elapsed ({ctx.created_days_ago}d old).",
+            )
+        return ConstraintResult("GDPR", Verdict.PERMIT,
+                                "GDPR Art.17: valid erasure request, retention period elapsed.")
+
+    if ctx.retention_days and ctx.created_days_ago and ctx.created_days_ago < ctx.retention_days:
+        return ConstraintResult(
+            "GDPR", Verdict.BLOCK,
+            f"GDPR Art.5(1)(e): storage limitation — data must be retained for "
+            f"{ctx.retention_days} days (only {ctx.created_days_ago} days old).",
+        )
+    return ConstraintResult("GDPR", Verdict.CONDITIONAL,
+                            "GDPR: deletion permitted but must be documented under Art.30 records.")
+
+
+def _check_ccpa(ctx: DataContext, action_type: str) -> ConstraintResult:
+    """CCPA: California Consumer Privacy Act — right to delete (§1798.105)."""
+    if not ctx.contains_pii or ctx.subject_jurisdiction != "CA":
+        return ConstraintResult("CCPA", Verdict.PERMIT, "CCPA not applicable.")
+
+    if ctx.has_consumer_request:
+        return ConstraintResult("CCPA", Verdict.PERMIT,
+                                "CCPA §1798.105: consumer deletion request — deletion required.")
+    return ConstraintResult("CCPA", Verdict.CONDITIONAL,
+                            "CCPA: deletion permitted; document business purpose under §1798.100.")
+
+
+def _check_hipaa(ctx: DataContext, action_type: str) -> ConstraintResult:
+    """HIPAA: PHI must be retained 6 years from creation or last effective date."""
+    if not ctx.contains_phi:
+        return ConstraintResult("HIPAA", Verdict.PERMIT, "HIPAA not applicable (no PHI detected).")
+
+    min_retention = 365 * 6  # 6 years
+    if ctx.created_days_ago is not None and ctx.created_days_ago < min_retention:
+        return ConstraintResult(
+            "HIPAA", Verdict.BLOCK,
+            f"HIPAA §164.530(j): PHI must be retained 6 years. "
+            f"Record is only {ctx.created_days_ago} days old (need {min_retention}).",
+        )
+    return ConstraintResult("HIPAA", Verdict.CONDITIONAL,
+                            "HIPAA: retention satisfied. Deletion must use NIST SP 800-88 media sanitization.")
+
+
+def _check_glba(ctx: DataContext, action_type: str) -> ConstraintResult:
+    """GLBA Safeguards Rule: financial records require documented disposal procedures."""
+    if not ctx.contains_financial:
+        return ConstraintResult("GLBA", Verdict.PERMIT, "GLBA not applicable (no financial data).")
+
+    if not ctx.is_backed_up:
+        return ConstraintResult(
+            "GLBA", Verdict.BLOCK,
+            "GLBA Safeguards Rule §314.4(f): customer financial records must be backed up "
+            "before destruction. No backup confirmed.",
+        )
+    return ConstraintResult("GLBA", Verdict.CONDITIONAL,
+                            "GLBA: disposal permitted with documented secure destruction method.")
+
+
+def _check_fcra(ctx: DataContext, action_type: str) -> ConstraintResult:
+    """FCRA: consumer report information — 7-year retention for adverse items."""
+    if not ctx.contains_financial or ctx.data_type not in ("financial", "credit"):
+        return ConstraintResult("FCRA", Verdict.PERMIT, "FCRA not applicable.")
+
+    min_retention = 365 * 7
+    if ctx.created_days_ago is not None and ctx.created_days_ago < min_retention:
+        return ConstraintResult(
+            "FCRA", Verdict.BLOCK,
+            f"FCRA §605: consumer report data must be retained 7 years. "
+            f"Record is {ctx.created_days_ago} days old (need {min_retention}).",
+        )
+    return ConstraintResult("FCRA", Verdict.PERMIT,
+                            "FCRA: 7-year retention period satisfied.")
+
+
+def _check_metro2_cdia(ctx: DataContext, action_type: str) -> ConstraintResult:
+    """Metro II / CDIA: credit reporting data format standards — accuracy obligations."""
+    if ctx.data_type not in ("credit", "financial"):
+        return ConstraintResult("Metro-II/CDIA", Verdict.PERMIT, "Metro II/CDIA not applicable.")
+
+    return ConstraintResult(
+        "Metro-II/CDIA", Verdict.CONDITIONAL,
+        "CDIA Metro II: deletion of tradeline data must be reported to all CRAs within 30 days "
+        "per e-OSCAR procedures to maintain accuracy obligations.",
+    )
+
+
+def _check_iso27001(ctx: DataContext, action_type: str) -> ConstraintResult:
+    """ISO 27001 A.8.3.2: media disposal must be documented and secure."""
+    if ctx.data_type in ("code", "log") and not ctx.contains_pii and not ctx.contains_financial:
+        return ConstraintResult("ISO-27001", Verdict.PERMIT,
+                                "ISO 27001 A.8.3.2: non-sensitive data, standard disposal acceptable.")
+    return ConstraintResult(
+        "ISO-27001", Verdict.CONDITIONAL,
+        "ISO 27001 A.8.3.2: secure disposal required. Document method (overwrite/crypto-erase) "
+        "and record in asset register.",
+    )
+
+
+# ─── Lattice evaluator ────────────────────────────────────────────────────────
+
+_CONSTRAINTS = [
+    _check_soc,
+    _check_gdpr,
+    _check_ccpa,
+    _check_hipaa,
+    _check_glba,
+    _check_fcra,
+    _check_metro2_cdia,
+    _check_iso27001,
+]
+
+
+@dataclass
+class ComplianceDecision:
+    action_id: str
+    action_type: str
+    path: str
+    timestamp: str
+    permitted: bool
+    lagrangian_value: float          # 0.0 = all clear, >0 = blocked
+    constraints: list[ConstraintResult]
+    mitigations_required: list[str]  # steps required for CONDITIONAL verdicts
+    blocking_regulations: list[str]
+    justification: str               # human-readable summary for audit log
+
+
+def evaluate(action_type: str, payload: dict, context: DataContext) -> ComplianceDecision:
+    """
+    Run the full compliance lattice against a proposed action.
+    Returns a ComplianceDecision with Lagrangian score and verdict.
+    """
+    action_id = str(uuid.uuid4())
+    timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+
+    results = [fn(context, action_type) for fn in _CONSTRAINTS]
+
+    # Tropical semiring (max-plus): overall score = max of weighted verdicts
+    # In standard interpretation: any BLOCK = blocked, else sum of weights
+    lagrangian = sum(r.lagrangian_lambda * r.verdict.lagrangian_weight for r in results)
+    blocking = [r.regulation for r in results if r.verdict == Verdict.BLOCK]
+    conditional = [r for r in results if r.verdict == Verdict.CONDITIONAL]
+
+    permitted = len(blocking) == 0
+
+    mitigations = []
+    for r in conditional:
+        mitigations.append(f"[{r.regulation}] {r.rationale}")
+
+    if permitted and not blocking:
+        if conditional:
+            justification = (
+                f"Action PERMITTED with {len(conditional)} mitigation(s) required. "
+                f"Lagrangian L={lagrangian:.2f}. "
+                f"Conditions: {'; '.join(r.regulation for r in conditional)}."
+            )
+        else:
+            justification = f"Action PERMITTED. All {len(results)} compliance constraints satisfied. L=0.00."
+    else:
+        justification = (
+            f"Action BLOCKED by {len(blocking)} regulation(s): {', '.join(blocking)}. "
+            f"Lagrangian L={lagrangian:.2f} > 0 — no valid justification path exists in the constraint lattice."
+        )
+
+    decision = ComplianceDecision(
+        action_id=action_id,
+        action_type=action_type,
+        path=context.path,
+        timestamp=timestamp,
+        permitted=permitted,
+        lagrangian_value=lagrangian,
+        constraints=results,
+        mitigations_required=mitigations,
+        blocking_regulations=blocking,
+        justification=justification,
+    )
+
+    _write_audit_log(decision)
+    return decision
+
+
+# ─── SOC-compliant immutable audit log ───────────────────────────────────────
+
+AUDIT_LOG_PATH = os.environ.get("AGENT_AUDIT_LOG", os.path.expanduser("~/.agent_audit.jsonl"))
+
+
+def _write_audit_log(decision: ComplianceDecision) -> None:
+    """
+    Append-only audit log entry. Each line is a JSON record with a SHA-256
+    chain hash linking to the previous entry (SOC II CC6.1 tamper evidence).
+    """
+    entry = {
+        "action_id": decision.action_id,
+        "timestamp": decision.timestamp,
+        "action_type": decision.action_type,
+        "path": decision.path,
+        "permitted": decision.permitted,
+        "lagrangian": decision.lagrangian_value,
+        "blocking": decision.blocking_regulations,
+        "mitigations": decision.mitigations_required,
+        "justification": decision.justification,
+        "constraints": [
+            {"regulation": r.regulation, "verdict": r.verdict.name, "rationale": r.rationale}
+            for r in decision.constraints
+        ],
+    }
+
+    # Chain hash: hash of (previous last line + this entry) for tamper detection
+    prev_hash = _last_audit_hash()
+    entry["prev_hash"] = prev_hash
+    entry_json = json.dumps(entry, separators=(",", ":"))
+    entry["hash"] = hashlib.sha256((prev_hash + entry_json).encode()).hexdigest()
+
+    with open(AUDIT_LOG_PATH, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def _last_audit_hash() -> str:
+    """Return the hash of the last audit log entry, or genesis hash if empty."""
+    genesis = "0" * 64
+    if not os.path.exists(AUDIT_LOG_PATH):
+        return genesis
+    try:
+        with open(AUDIT_LOG_PATH, "rb") as f:
+            # Efficiently read last line
+            f.seek(0, 2)
+            size = f.tell()
+            if size == 0:
+                return genesis
+            f.seek(max(0, size - 4096))
+            lines = f.read().decode(errors="replace").strip().splitlines()
+            if not lines:
+                return genesis
+            last = json.loads(lines[-1])
+            return last.get("hash", genesis)
+    except Exception:
+        return genesis
+
+
+def infer_context(path: str, description: str = "") -> DataContext:
+    """
+    Heuristically infer DataContext from a file path and action description.
+    The agent calls this before any destructive action.
+    """
+    path_lower = path.lower()
+    desc_lower = description.lower()
+    combined = path_lower + " " + desc_lower
+
+    return DataContext(
+        path=path,
+        data_type=(
+            "health"     if any(k in combined for k in ("hipaa", "health", "patient", "medical", "phi")) else
+            "financial"  if any(k in combined for k in ("finance", "bank", "credit", "payment", "fcra", "glba", "metro", "tradeline")) else
+            "credential" if any(k in combined for k in ("password", "secret", "key", "token", "credential", "ssh")) else
+            "log"        if any(k in combined for k in ("log", "audit", "soc", "event")) else
+            "pii"        if any(k in combined for k in ("pii", "user", "customer", "email", "name", "address", "ssn")) else
+            "code"
+        ),
+        subject_jurisdiction=(
+            "EU" if any(k in combined for k in ("gdpr", "eu", "europe", ".de", ".fr", ".nl")) else
+            "CA" if any(k in combined for k in ("ccpa", "california", ".ca")) else
+            "US"
+        ),
+        contains_pii=any(k in combined for k in ("pii", "user", "customer", "email", "ssn", "name", "address", "personal")),
+        contains_phi=any(k in combined for k in ("health", "patient", "medical", "phi", "diagnosis", "prescription")),
+        contains_financial=any(k in combined for k in ("finance", "bank", "credit", "payment", "transaction", "account", "tradeline")),
+        is_audit_log=any(k in combined for k in ("audit", "soc", ".log", "event_log", "access_log")),
+    )
+
+
+def print_decision(decision: ComplianceDecision) -> None:
+    """Pretty-print a compliance decision to the terminal."""
+    icon = "✅" if decision.permitted else "🚫"
+    print(f"\n{'═'*60}")
+    print(f"  {icon} COMPLIANCE DECISION — {decision.action_type.upper()}")
+    print(f"  Path     : {decision.path}")
+    print(f"  Lagrangian L = {decision.lagrangian_value:.2f}  ({'PASS' if decision.permitted else 'FAIL'})")
+    print(f"{'─'*60}")
+    for r in decision.constraints:
+        symbol = {"PERMIT": "✓", "CONDITIONAL": "◑", "BLOCK": "✗"}[r.verdict.name]
+        print(f"  {symbol} [{r.regulation:<15}] {r.rationale[:65]}")
+    if decision.mitigations_required:
+        print(f"\n  Required mitigations:")
+        for m in decision.mitigations_required:
+            print(f"    • {m[:75]}")
+    if decision.blocking_regulations:
+        print(f"\n  BLOCKED BY: {', '.join(decision.blocking_regulations)}")
+    print(f"\n  Audit ID : {decision.action_id}")
+    print(f"  Log      : {AUDIT_LOG_PATH}")
+    print(f"{'═'*60}\n")

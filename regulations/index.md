@@ -28,6 +28,14 @@ the operative provisions that the lattice evaluates.
 | `google_terms.md` | Google Gemini API | §7.2 Human Review, ISO 27001 / SOC 2 |
 | `openrouter_terms.md` | OpenRouter | §2.1 Pass-Through Compliance (all providers) |
 
+## International Jurisdictions
+
+| File | Jurisdiction | Key Provisions |
+|------|-------------|----------------|
+| `lgpd.md` | Brazil LGPD | Art. 7 Legal Bases, Art. 38 Cross-Border, Art. 46 Security |
+| `pipeda.md` | Canada PIPEDA / Quebec Law 25 | Principle 4.3 Consent, Principle 4.7 Safeguards, Bill C-27 s.55 ADS |
+| `pipl.md` | China PIPL | Art. 6 Minimum Necessity, Art. 38 Cross-Border (CAC approval), Art. 55 Impact Assessment |
+
 
 > **Note:** These are excerpts for machine-readable compliance evaluation.
 > For legal advice, consult qualified counsel.

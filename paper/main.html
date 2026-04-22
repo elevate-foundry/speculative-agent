@@ -990,14 +990,39 @@ that is both computationally efficient and formally complete with
 respect to a family of regulatory constraints (Theorem <a
 href="#thm:compliance" data-reference-type="ref"
 data-reference="thm:compliance">2</a>).</p></li>
-<li><p>A privacy routing policy with formal non-exfiltration guarantees
-for keyword-detectable sensitive content.</p></li>
+<li><p>A Braille lattice isomorphism theorem connecting the <span
+class="math inline">\(2^8\)</span>-state compliance decision vector to
+8-dot computer Braille (ISO 17548), enabling single-byte compliance
+state serialization over any UTF-8 channel (Theorem <a
+href="#thm:isomorphism" data-reference-type="ref"
+data-reference="thm:isomorphism">[thm:isomorphism]</a>,
+Corollary 1).</p></li>
+<li><p>A UCB1 multi-armed bandit for automatic provider selection with
+<span class="math inline">\(O(\sqrt{nk \ln n})\)</span> regret,
+converging through passive production-race observations at zero
+additional latency cost.</p></li>
+<li><p>A SOC II CC6.1 compliant append-only audit log with SHA-256 hash
+chain providing tamper-evident provenance for every agent action
+(Theorem <a href="#thm:tamper" data-reference-type="ref"
+data-reference="thm:tamper">4</a>).</p></li>
+<li><p>A pre-flight autonomy assessment protocol in which models
+collectively vote on the risk level of a proposed task and self-select
+the minimum required autonomy level, with the user-configured level
+acting as a hard ceiling.</p></li>
+<li><p>Compliance lattice coverage extended to thirteen regulatory
+frameworks across five jurisdictions: EU (GDPR), US (HIPAA, FCRA, GLBA,
+CCPA, SOC II), Brazil (LGPD), Canada (PIPEDA), and China (PIPL), plus
+provider terms of service for OpenAI, Anthropic, Google, and
+OpenRouter.</p></li>
 </ol>
-<p>Future work includes: (1) learned confidence scoring to replace the
-heuristic threshold; (2) full UCB1 bandit implementation for automatic
-provider selection; (3) extension of the compliance lattice to
-additional jurisdictions (Brazil LGPD, Canada PIPEDA, China PIPL); and
-(4) formal verification of the audit log integrity property.</p>
+<p>Future work includes: (1) learned confidence scoring via a reward
+model trained on labeled compliance decisions to replace the current
+heuristic threshold; (2) formal verification of the audit log integrity
+property in TLA<sup>+</sup> or Coq, establishing machine-checked proofs
+of Theorem <a href="#thm:tamper" data-reference-type="ref"
+data-reference="thm:tamper">4</a>; and (3) extension of the pre-flight
+protocol to use a fine-tuned risk classifier in place of the
+general-purpose chat models.</p>
 <div id="refs" class="references csl-bib-body hanging-indent"
 role="list">
 <div id="ref-anthropic2024claude" class="csl-entry" role="listitem">

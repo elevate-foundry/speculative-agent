@@ -758,15 +758,35 @@ autonomous agent architecture. The key theoretical contributions are:
   both computationally efficient and formally complete with respect to a family of
   regulatory constraints (Theorem~\ref{thm:compliance}).
 
-  \item A privacy routing policy with formal non-exfiltration guarantees for
-  keyword-detectable sensitive content.
+  \item A Braille lattice isomorphism theorem connecting the $2^8$-state compliance
+  decision vector to 8-dot computer Braille (ISO~17548), enabling single-byte
+  compliance state serialization over any UTF-8 channel
+  (Theorem~\ref{thm:isomorphism}, Corollary~1).
+
+  \item A UCB1 multi-armed bandit for automatic provider selection with
+  $O(\sqrt{nk \ln n})$ regret, converging through passive production-race
+  observations at zero additional latency cost.
+
+  \item A SOC~II CC6.1 compliant append-only audit log with SHA-256 hash chain
+  providing tamper-evident provenance for every agent action
+  (Theorem~\ref{thm:tamper}).
+
+  \item A pre-flight autonomy assessment protocol in which models collectively
+  vote on the risk level of a proposed task and self-select the minimum required
+  autonomy level, with the user-configured level acting as a hard ceiling.
+
+  \item Compliance lattice coverage extended to thirteen regulatory frameworks
+  across five jurisdictions: EU (GDPR), US (HIPAA, FCRA, GLBA, CCPA, SOC~II),
+  Brazil (LGPD), Canada (PIPEDA), and China (PIPL), plus provider terms of
+  service for OpenAI, Anthropic, Google, and OpenRouter.
 \end{enumerate}
 
-Future work includes: (1) learned confidence scoring to replace the heuristic
-threshold; (2) full UCB1 bandit implementation for automatic provider selection;
-(3) extension of the compliance lattice to additional jurisdictions (Brazil LGPD,
-Canada PIPEDA, China PIPL); and (4) formal verification of the audit log integrity
-property.
+Future work includes: (1) learned confidence scoring via a reward model trained
+on labeled compliance decisions to replace the current heuristic threshold;
+(2) formal verification of the audit log integrity property in TLA\textsuperscript{+}
+or Coq, establishing machine-checked proofs of Theorem~\ref{thm:tamper};
+and (3) extension of the pre-flight protocol to use a fine-tuned risk
+classifier in place of the general-purpose chat models.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \bibliographystyle{plain}

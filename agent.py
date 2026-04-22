@@ -196,6 +196,23 @@ class Agent:
                 print(f"[agent] Task classifier: tier={tier!r} — upgrading model pool...")
             active_models = await self._models_for_tier(tier)
 
+        # Sort and cap race pool by UCB1 scores from accumulated benchmark stats
+        try:
+            from benchmark import load_stats
+            _bstats = load_stats()
+            if _bstats:
+                _total = sum(s.races for s in _bstats.values())
+                active_models = sorted(
+                    active_models,
+                    key=lambda m: _bstats[m.name].ucb1(_total)
+                                  if m.name in _bstats else float("inf"),
+                    reverse=True,
+                )
+            # Cap at 6 to avoid rate limits; UCB1 ensures best+unexplored models race
+            active_models = active_models[:6]
+        except Exception:
+            pass
+
         # Pre-flight: let models choose their own autonomy level (capped by user config)
         import executor as _exe
         _configured_autonomy = _exe.AUTONOMY

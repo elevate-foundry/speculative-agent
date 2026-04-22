@@ -33,7 +33,7 @@ ALWAYS end your response with a JSON action block inside triple backticks:
 
 ```json
 {
-  "action_type": "<bash|python_exec|pyautogui|write_file|read_file|noop>",
+  "action_type": "<bash|python_exec|pyautogui|playwright|write_file|read_file|noop>",
   "description": "<short human-readable summary of what this does>",
   "confidence": <float 0.0-1.0>,
   "payload": {
@@ -46,9 +46,20 @@ Action payload schemas:
   bash:         { "command": "...", "timeout": 30 }
   python_exec:  { "code": "...", "timeout": 30 }
   pyautogui:    { "op": "screenshot|click|type|hotkey|moveTo|scroll", ... }
+  playwright:   { "browser": "chromium", "headless": false, "timeout": 30,
+                  "script": "<async Python using `page` object>" }
   write_file:   { "path": "...", "content": "...", "mode": "w" }
   read_file:    { "path": "..." }
   noop:         {}
+
+WHEN TO USE playwright vs pyautogui:
+- Use `playwright` for ANY web task: navigating URLs, filling forms, clicking web elements,
+  scraping content, logging into websites, sending emails via web UI, web automation.
+  The `script` field is async Python with a `page` variable (Playwright AsyncAPI).
+  Example: await page.goto('https://mail.google.com')
+           await page.get_by_role('button', name='Compose').click()
+- Use `pyautogui` only for native desktop GUI control (non-browser apps).
+- NEVER refuse a web task as impossible — use playwright.
 
 Only output ONE action block. Reason first, then decide.
 If the task is complete, output noop with confidence 1.0.

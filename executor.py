@@ -15,10 +15,10 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 
-ALLOWED_ACTION_TYPES = {"bash", "python_exec", "pyautogui", "write_file", "read_file", "noop"}
+ALLOWED_ACTION_TYPES = {"bash", "python_exec", "pyautogui", "playwright", "write_file", "read_file", "noop"}
 
 # Actions that are always interactive (never auto-approved)
-ALWAYS_CONFIRM = {"bash", "python_exec", "pyautogui", "write_file"}
+ALWAYS_CONFIRM = {"bash", "python_exec", "pyautogui", "playwright", "write_file"}
 
 
 @dataclass
@@ -116,6 +116,9 @@ def execute(action: Action, auto_approve: bool = False) -> ActionResult:
         elif action.action_type == "write_file":
             return _write_file(action.payload)
 
+        elif action.action_type == "playwright":
+            return _run_playwright(action.payload)
+
         elif action.action_type == "read_file":
             return _read_file(action.payload)
 
@@ -211,6 +214,61 @@ def _run_pyautogui(payload: dict) -> ActionResult:
 
     else:
         return ActionResult(success=False, output="", error=f"Unknown pyautogui op: {op}")
+
+
+def _run_playwright(payload: dict) -> ActionResult:
+    """
+    Runs a Playwright script. The payload must contain a 'script' key with
+    async Python code that has access to a `page` object (Playwright Page).
+    Optional: 'browser' (chromium|firefox|webkit), 'headless' (bool), 'timeout' (int seconds).
+
+    Example payload:
+        {
+          "browser": "chromium",
+          "headless": false,
+          "timeout": 30,
+          "script": "await page.goto('https://example.com')\nprint(await page.title())"
+        }
+    """
+    script_body = payload.get("script", "")
+    browser_type = payload.get("browser", "chromium")
+    headless = payload.get("headless", False)  # default visible so user can watch
+    timeout = int(payload.get("timeout", 30))
+
+    # Wrap the user script in a full async Playwright harness
+    full_code = f"""import asyncio
+from playwright.async_api import async_playwright
+
+async def run():
+    async with async_playwright() as pw:
+        browser = await pw.{browser_type}.launch(headless={headless})
+        page = await browser.new_page()
+        try:
+{textwrap.indent(textwrap.dedent(script_body), '            ')}
+        finally:
+            await browser.close()
+
+asyncio.run(run())
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(full_code)
+        tmp_path = f.name
+    try:
+        result = subprocess.run(
+            [sys.executable, tmp_path],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        combined = result.stdout + (f"\nSTDERR:\n{result.stderr}" if result.stderr.strip() else "")
+        return ActionResult(
+            success=result.returncode == 0,
+            output=combined.strip(),
+            error=result.stderr.strip() if result.returncode != 0 else None,
+        )
+    finally:
+        os.unlink(tmp_path)
 
 
 def _write_file(payload: dict) -> ActionResult:

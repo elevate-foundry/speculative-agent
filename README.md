@@ -16,10 +16,45 @@ Make sure Ollama is running:
 ollama serve
 ```
 
-Pull at least one model:
+### How many models do you need?
+
+**Minimum: 1** (works, but no race). **Recommended minimum: 3** for meaningful speculation.
+
+The agent auto-detects RAM and limits how many models run simultaneously:
+
+```
+max_parallel = floor((total_ram - 2 GB) / avg_model_size_gb)
+```
+
+Pick a starter set based on your RAM:
+
+| RAM | Pull these models | Parallel at once |
+|-----|-------------------|-----------------|
+| 8 GB | `llama3.2:1b` + `qwen2.5-coder` | 2 |
+| 16 GB | + `gemma3:4b` + `distilled-phi3.5` + `deepseek-r1` | 3 |
+| 32 GB | + `mistral` + `llama3.2` | 5+ |
+| 64 GB+ | + `llama3.3:70b` | 7+ |
+
+You can pull more models than fit in RAM — extras queue behind the semaphore and run when a slot frees. They just won't truly race in parallel.
+
+**Recommended diversity:** one fast/small model, one code-focused, one deep reasoner.
+
 ```bash
-ollama pull llama3.2
+# 8 GB minimum
+ollama pull llama3.2:1b
 ollama pull qwen2.5-coder
+
+# 16 GB recommended
+ollama pull llama3.2:1b
+ollama pull distilled-phi3.5
+ollama pull gemma3:4b
+ollama pull qwen2.5-coder
+ollama pull deepseek-r1
+```
+
+Override which models race (without changing code):
+```bash
+AGENT_MODELS="llama3.2:1b,qwen2.5-coder:latest" python agent.py
 ```
 
 ## Run

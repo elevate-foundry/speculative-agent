@@ -34,6 +34,7 @@ class ProviderConfig:
     auth_prefix: str = "Bearer"
     extra_headers: dict[str, str] = field(default_factory=dict)
     use_messages_api: bool = False  # True = Anthropic native /v1/messages SSE format
+    skip_discovery: bool = False    # True = use static model list, skip /models endpoint
 
 
 PROVIDER_REGISTRY: list[ProviderConfig] = [
@@ -67,6 +68,7 @@ PROVIDER_REGISTRY: list[ProviderConfig] = [
             "standard":    ["gemini-2.0-flash"],
             "performance": ["gemini-2.5-pro-preview-05-06"],
         },
+        skip_discovery=True,  # dynamic discovery pulls gemini-2.5-flash which rate-limits
     ),
     ProviderConfig(
         name="xai",
@@ -117,7 +119,7 @@ async def discover_provider_models(provider: ProviderConfig, verbose: bool = Fal
     Falls back to the static list if the API call fails.
     Filters to chat/text-generation models only.
     """
-    if not provider.api_key:
+    if not provider.api_key or provider.skip_discovery:
         return
 
     headers = {provider.auth_header: f"{provider.auth_prefix} {provider.api_key}".strip()}

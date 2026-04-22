@@ -83,8 +83,34 @@ def classify_task_tier(task: str) -> str:
     recommended_idx = tier_order.index(recommended)
     return tier_order[min(recommended_idx, ceiling)]
 
-# Models to include in the race. Override with AGENT_MODELS env var (comma-separated).
-# Defaults to a hand-picked set balancing speed, reasoning, and code ability.
+# Whether to include local Ollama models in the race.
+# Default: off when OPENROUTER_API_KEY is set (cloud is faster and stronger),
+#          on when no API key (local is the only option).
+# Override: AGENT_LOCAL=1 forces local on, AGENT_LOCAL=0 forces it off.
+_local_env = os.environ.get("AGENT_LOCAL", "").strip()
+if _local_env == "1":
+    USE_LOCAL_MODELS = True
+elif _local_env == "0":
+    USE_LOCAL_MODELS = False
+else:
+    USE_LOCAL_MODELS = not bool(OPENROUTER_API_KEY)  # off if cloud available
+
+# Tasks containing these keywords are always routed to local models only,
+# regardless of USE_LOCAL_MODELS, to avoid sending sensitive data to cloud.
+_PRIVATE_KEYWORDS = [
+    "password", "secret", "private key", "api key", "token", "credential",
+    "ssh", "gpg", "keychain", "wallet", "bank", "social security", "ssn",
+    "passport", "medical", "confidential",
+]
+
+
+def is_private_task(task: str) -> bool:
+    """Return True if the task contains privacy-sensitive keywords."""
+    t = task.lower()
+    return any(kw in t for kw in _PRIVATE_KEYWORDS)
+
+
+# Models to include in the local race. Override with AGENT_MODELS env var.
 _DEFAULT_RACE_MODELS = [
     "llama3.2:1b",
     "distilled-phi3.5:latest",
@@ -92,6 +118,7 @@ _DEFAULT_RACE_MODELS = [
     "qwen2.5-coder:latest",
     "deepseek-r1:latest",
 ]
+
 
 def get_race_allowlist() -> list[str] | None:
     env = os.environ.get("AGENT_MODELS", "").strip()
@@ -321,19 +348,26 @@ async def discover_and_warmup(verbose: bool = True) -> tuple[list[ModelInfo], Ha
               f"→ max {hw.max_parallel_models} parallel models")
 
     # --- Ollama local models ---
-    all_local = await list_local_models()
-    if not all_local and not OPENROUTER_API_KEY:
-        raise RuntimeError("No Ollama models found and no OPENROUTER_API_KEY set.")
-
-    allowlist = get_race_allowlist()
-    if allowlist:
-        available_names = {m.name for m in all_local}
-        local_models = [m for m in all_local if m.name in allowlist]
-        missing = [n for n in allowlist if n not in available_names]
-        if missing and verbose:
-            print(f"[config] Skipping (not pulled): {missing}")
+    local_models = []
+    if USE_LOCAL_MODELS:
+        all_local = await list_local_models()
+        allowlist = get_race_allowlist()
+        if allowlist:
+            available_names = {m.name for m in all_local}
+            local_models = [m for m in all_local if m.name in allowlist]
+            missing = [n for n in allowlist if n not in available_names]
+            if missing and verbose:
+                print(f"[config] Skipping (not pulled): {missing}")
+        else:
+            local_models = all_local
+        if verbose and local_models:
+            print(f"[config] Local models: {[m.name for m in local_models]}")
     else:
-        local_models = all_local
+        if verbose:
+            print("[config] Local models: disabled (cloud available — use AGENT_LOCAL=1 to force on)")
+
+    if not local_models and not OPENROUTER_API_KEY:
+        raise RuntimeError("No Ollama models found and no OPENROUTER_API_KEY set.")
 
     # --- OpenRouter cloud models ---
     or_models = []

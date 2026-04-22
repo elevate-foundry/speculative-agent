@@ -25,6 +25,7 @@ from typing import Optional
 from config import (
     discover_and_warmup, HardwareProfile, ModelInfo, OLLAMA_BASE,
     classify_task_tier, list_openrouter_models, BUDGET_TIER, OPENROUTER_API_KEY,
+    is_private_task,
 )
 from supervisor import supervise_race, print_race_summary
 from executor import execute, Action, ActionResult
@@ -139,11 +140,25 @@ class Agent:
         max_steps is reached. Each step can retry up to max_retries_per_step times
         on failure before moving on.
         """
-        # Auto-detect best budget tier for this task
-        tier = classify_task_tier(task)
-        if tier != "free" and self.verbose:
-            print(f"[agent] Task classifier: tier={tier!r} — upgrading model pool...")
-        active_models = await self._models_for_tier(tier)
+        # Privacy check: sensitive tasks never leave the machine
+        if is_private_task(task):
+            local_only = [m for m in self.models if m.provider == "ollama"]
+            if local_only:
+                if self.verbose:
+                    print(f"[agent] 🔒 Privacy mode: routing to local models only (sensitive keywords detected)")
+                active_models = local_only
+                tier = "free"
+            else:
+                print("[agent] ⚠️  WARNING: task looks sensitive but no local models are loaded. "
+                      "Proceeding with cloud (use AGENT_LOCAL=1 to always include local models).")
+                active_models = self.models
+                tier = classify_task_tier(task)
+        else:
+            # Auto-detect best budget tier for this task
+            tier = classify_task_tier(task)
+            if tier != "free" and self.verbose:
+                print(f"[agent] Task classifier: tier={tier!r} — upgrading model pool...")
+            active_models = await self._models_for_tier(tier)
 
         last_result: Optional[ActionResult] = None
         consecutive_failures = 0
@@ -352,12 +367,19 @@ async def main():
     parser.add_argument("--budget", choices=["free", "standard", "performance"], default=None,
                         help="Budget ceiling: free (default) | standard | performance. "
                              "Can also set via AGENT_BUDGET env var.")
+    parser.add_argument("--local", action="store_true",
+                        help="Include local Ollama models in the race alongside cloud models.")
     args = parser.parse_args()
 
     if args.budget:
         os.environ["AGENT_BUDGET"] = args.budget
         import config as _cfg
         _cfg.BUDGET_TIER = args.budget
+
+    if args.local:
+        os.environ["AGENT_LOCAL"] = "1"
+        import config as _cfg
+        _cfg.USE_LOCAL_MODELS = True
 
     print("Discovering and warming up Ollama models...")
     models, hw = await discover_and_warmup(verbose=True)

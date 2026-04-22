@@ -217,6 +217,8 @@ id="toc-sec:eval-compliance">Compliance Lattice Accuracy</a></li>
 Efficiency</a></li>
 </ul></li>
 <li><a href="#sec:related" id="toc-sec:related">Related Work</a></li>
+<li><a href="#sec:substrate" id="toc-sec:substrate">On Capability,
+Governance, and the Substrate Question</a></li>
 <li><a href="#conclusion" id="toc-conclusion">Conclusion</a></li>
 </ul>
 </nav>
@@ -238,8 +240,18 @@ agents gain the ability to delete files, modify databases, and submit
 forms, the question of <em>which actions are legally permissible</em>
 becomes critical. No prior agent system incorporates structured
 regulatory reasoning as a precondition for action execution.</p></li>
+<li><p><strong>Governance under increasing capability.</strong> This
+paper does not claim to present an artificially general intelligence.
+The system’s reasoning is entirely provided by the underlying models it
+races. We claim something more modest and, we argue, more immediately
+useful: a <em>substrate</em> whose compliance and governance mechanisms
+are designed to remain binding as the capability of the underlying
+models increases. The compliance lattice does not reason about whether
+an action is intelligent — it enforces whether it is
+<em>permissible</em>, independently of the source of the
+proposal.</p></li>
 </ol>
-<p>We address both problems. Our contributions are:</p>
+<p>We address these problems. Our contributions are:</p>
 <ul>
 <li><p>A <strong>parallel speculative racing architecture</strong> that
 runs <span class="math inline">\(n\)</span> models from heterogeneous
@@ -1207,6 +1219,55 @@ network routing <span class="citation"
 data-cites="gondran2008graphs">(Gondran and Minoux 2008)</span>.
 Application to regulatory constraint satisfaction is, to our knowledge,
 novel.</p>
+<h1 id="sec:substrate">On Capability, Governance, and the Substrate
+Question</h1>
+<p>We close with an observation about the architectural position of this
+work relative to the broader question of highly capable AI systems.</p>
+<p>This system is not intelligent. Its reasoning capacity is entirely
+borrowed from the models it orchestrates. A racing outcome is only as
+good as the best model in the pool, and the compliance lattice cannot
+prevent a model from proposing an action it should not — it can only
+prevent the action from <em>executing</em>. The sensorium
+(<code>infer_context</code>) uses keyword heuristics, not genuine
+semantic understanding of data sensitivity.</p>
+<p>However, we observe that these limitations are <em>architectural
+boundaries</em>, not fundamental ones. The compliance lattice is
+model-agnostic: it would enforce the same constraints on a
+hypothetically much more capable model proposing the same action. The
+preflight protocol asks models to reason about their own risk exposure
+before acting — a form of <em>introspective governance</em> that scales
+with model capability rather than degrading under it. The audit log
+provides tamper-evident provenance that does not depend on the honesty
+of the executing model.</p>
+<div class="proposition">
+<p><strong>Proposition 8</strong> (Governance Invariance). <em>Let <span
+class="math inline">\(\mathcal{M}_1\)</span> and <span
+class="math inline">\(\mathcal{M}_2\)</span> be two models with <span
+class="math inline">\(\mathcal{M}_2\)</span> strictly more capable than
+<span class="math inline">\(\mathcal{M}_1\)</span> in the sense that
+<span class="math inline">\(\Pr[q(\mathcal{M}_2) &gt; q(\mathcal{M}_1)]
+&gt; 0.5\)</span> on the quality distribution. For any action <span
+class="math inline">\(a\)</span> proposed by either model, the
+compliance decision <span class="math inline">\(\text{evaluate}(a, d)
+\in \{\mathbf{Permit}, \mathbf{Conditional}, \mathbf{Block}\}\)</span>
+is identical: the lattice is capability-blind.</em></p>
+</div>
+<p>This is precisely the property a safety substrate requires. We do not
+claim safe deployment of highly capable AI is <em>solved</em> by this
+architecture. We claim that the mechanisms described here — hard
+constraint enforcement independent of model capability, self-assessed
+autonomy ceilings, tamper-evident audit provenance, and multi-provider
+consensus on risk — are <em>necessary conditions</em> for such
+deployment, and that their formalization in a running system represents
+useful groundwork regardless of when, or whether, substantially more
+capable systems arrive.</p>
+<p>The question “is this AGI?” is less interesting than: “if AGI arrived
+in one of the racing slots, would this substrate hold?” The compliance
+lattice would block the same prohibited actions. The autonomy ceiling
+would remain the user’s to set. The audit log would record every step.
+Whether that is sufficient depends on what the model proposes — which is
+why the preflight vote, learned confidence scoring, and formal
+verification of the audit chain remain important open problems.</p>
 <h1 id="conclusion">Conclusion</h1>
 <p>We have presented Speculative Agent, a system that unifies
 cross-vendor LLM racing, tropical compliance lattice enforcement, and
@@ -1252,9 +1313,15 @@ model trained on labeled compliance decisions to replace the current
 heuristic threshold; (2) formal verification of the audit log integrity
 property in TLA<sup>+</sup> or Coq, establishing machine-checked proofs
 of Theorem <a href="#thm:tamper" data-reference-type="ref"
-data-reference="thm:tamper">4</a>; and (3) extension of the pre-flight
+data-reference="thm:tamper">4</a>; (3) extension of the pre-flight
 protocol to use a fine-tuned risk classifier in place of the
-general-purpose chat models.</p>
+general-purpose chat models; and (4) empirical evaluation of the
+governance invariance property (Proposition <a href="#sec:substrate"
+data-reference-type="ref" data-reference="sec:substrate">11</a>) as
+racing pool capability increases — testing whether the lattice’s
+blocking rate remains stable as stronger models are introduced, or
+whether more capable models find paths the sensorium does not recognize
+as regulated.</p>
 <div id="refs" class="references csl-bib-body hanging-indent"
 role="list">
 <div id="ref-anthropic2024claude" class="csl-entry" role="listitem">

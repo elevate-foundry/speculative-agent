@@ -475,6 +475,28 @@ async def supervise_race(
                 print(f"\n[supervisor] Winner (post-race): {winner.model_source} "
                       f"score={best_score:.2f} latency={best_ms:.0f}ms")
 
+    # Record production race outcomes into benchmark stats (passive learning)
+    try:
+        from benchmark import load_stats, save_stats, ModelStats
+        bstats = load_stats()
+        for s in streams.values():
+            if s.model_name not in bstats:
+                bstats[s.model_name] = ModelStats(
+                    model_name=s.model_name, provider=s.provider)
+            ms = bstats[s.model_name]
+            ms.races += 1
+            if s.error:
+                ms.errors += 1
+            else:
+                quality = score_reasoning(s.text) if s.text else 0.0
+                ms.quality_sum += quality
+                ms.latency_sum_ms += s.elapsed_ms
+                if winner and s.model_name == winner.model_source:
+                    ms.wins += 1
+        save_stats(bstats)
+    except Exception:
+        pass  # never let stats recording break the agent
+
     return winner, list(streams.values())
 
 

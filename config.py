@@ -447,6 +447,19 @@ async def discover_and_warmup(verbose: bool = True) -> tuple[list[ModelInfo], Ha
     live = [m for m in warmed if m.warmed]
     dead = [m for m in warmed if not m.warmed]
 
+    # Sort by UCB1 score from benchmark stats — best performers race first
+    try:
+        from benchmark import load_stats
+        bstats = load_stats()
+        total_races = sum(s.races for s in bstats.values())
+        if bstats and total_races > 0:
+            live.sort(key=lambda m: bstats[m.name].ucb1(total_races)
+                      if m.name in bstats else float("inf"), reverse=True)
+            if verbose:
+                print("[config] Model order set by UCB1 benchmark scores")
+    except Exception:
+        pass  # benchmark module not yet run — use default order
+
     if verbose:
         for m in live:
             if m.provider == "openrouter":

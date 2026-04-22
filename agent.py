@@ -397,7 +397,7 @@ async def interactive_repl(agent: Agent):
     print(f"  Autonomy : {autonomy_icon.get(autonomy, autonomy)}")
     print(f"  Budget   : {budget_icon.get(budget, budget)}")
     print(f"  Models   : {len(agent.models)} active  ({', '.join(m.provider for m in agent.models[:3])}{'...' if len(agent.models) > 3 else ''})")
-    print("  Commands : /models /history /thoughts /quit")
+    print("  Commands : /models /history /thoughts /stats /bench /quit")
     print("═" * 60 + "\n")
 
     while True:
@@ -417,6 +417,15 @@ async def interactive_repl(agent: Agent):
             agent.show_history()
         elif task == "/thoughts":
             agent.show_thoughts()
+        elif task == "/stats":
+            from benchmark import load_stats, print_stats_table
+            print_stats_table(load_stats())
+        elif task.startswith("/bench"):
+            parts = task.split()
+            rounds = int(parts[1]) if len(parts) > 1 else 10
+            suite  = parts[2] if len(parts) > 2 else "mixed"
+            from benchmark import run_benchmark
+            await run_benchmark(suite_name=suite, rounds=rounds, verbose=False)
         else:
             await agent.run_task(task)
 

@@ -42,6 +42,7 @@ MIN_TOKENS_FOR_SHORTCIRCUIT = 40
 @dataclass
 class ModelStream:
     model_name: str
+    provider: str = "ollama"   # "ollama" or "openrouter"
     tokens: list[str] = field(default_factory=list)
     done: bool = False
     cancelled: bool = False
@@ -97,20 +98,22 @@ def _assign_colors(model_names: list[str]) -> None:
             _MODEL_COLORS[name] = _COLORS[i % len(_COLORS)]
 
 
-def _model_label(model_name: str) -> str:
+def _model_label(model_name: str, provider: str = "ollama") -> str:
     color = _MODEL_COLORS.get(model_name, "")
     short = model_name.split(":")[0].split("/")[-1][:16]
-    return f"{color}{_BOLD}[{short}]{_RESET}"
+    cloud = "☁" if provider == "openrouter" else "⬡"
+    return f"{color}{_BOLD}{cloud}[{short}]{_RESET}"
 
 
-async def stream_model(
+async def _stream_ollama(
     model_name: str,
     prompt: str,
+    system_prompt: str,
     stream_obj: ModelStream,
     cancel_event: asyncio.Event,
-    ollama_base: str = "http://localhost:11434",
-    system_prompt: str = "",
-    live_output: bool = True,
+    ollama_base: str,
+    color: str,
+    live_output: bool,
 ) -> None:
     import httpx
     import json as _json
@@ -122,37 +125,111 @@ async def stream_model(
         "system": system_prompt,
         "options": {"temperature": 0.3, "num_predict": 512},
     }
+    async with httpx.AsyncClient(timeout=120) as client:
+        async with client.stream("POST", f"{ollama_base}/api/generate", json=payload) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if cancel_event.is_set():
+                    stream_obj.cancelled = True
+                    return
+                if not line.strip():
+                    continue
+                try:
+                    chunk = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+                token = chunk.get("response", "")
+                if token:
+                    stream_obj.tokens.append(token)
+                    if live_output:
+                        sys.stdout.write(f"{color}{token}{_RESET}")
+                        sys.stdout.flush()
+                if chunk.get("done", False):
+                    stream_obj.done = True
+                    return
 
-    label = _model_label(model_name)
+
+async def _stream_openrouter(
+    model_name: str,
+    prompt: str,
+    system_prompt: str,
+    stream_obj: ModelStream,
+    cancel_event: asyncio.Event,
+    color: str,
+    live_output: bool,
+) -> None:
+    import httpx
+    import json as _json
+    from config import OPENROUTER_BASE, OPENROUTER_API_KEY
+
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": prompt},
+        ],
+        "stream": True,
+        "max_tokens": 512,
+        "temperature": 0.3,
+    }
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "https://github.com/elevate-foundry/speculative-agent",
+        "X-Title": "speculative-agent",
+    }
+    async with httpx.AsyncClient(timeout=120) as client:
+        async with client.stream("POST", f"{OPENROUTER_BASE}/chat/completions",
+                                 json=payload, headers=headers) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if cancel_event.is_set():
+                    stream_obj.cancelled = True
+                    return
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:].strip()
+                if data == "[DONE]":
+                    stream_obj.done = True
+                    return
+                try:
+                    chunk = _json.loads(data)
+                except _json.JSONDecodeError:
+                    continue
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                token = delta.get("content", "")
+                if token:
+                    stream_obj.tokens.append(token)
+                    if live_output:
+                        sys.stdout.write(f"{color}{token}{_RESET}")
+                        sys.stdout.flush()
+                finish = chunk.get("choices", [{}])[0].get("finish_reason")
+                if finish and finish != "null":
+                    stream_obj.done = True
+                    return
+
+
+async def stream_model(
+    model_name: str,
+    prompt: str,
+    stream_obj: ModelStream,
+    cancel_event: asyncio.Event,
+    ollama_base: str = "http://localhost:11434",
+    system_prompt: str = "",
+    live_output: bool = True,
+) -> None:
+    label = _model_label(model_name, stream_obj.provider)
     color = _MODEL_COLORS.get(model_name, "")
 
     t0 = time.perf_counter()
     if live_output:
         print(f"\n{label} starting...")
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream("POST", f"{ollama_base}/api/generate", json=payload) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if cancel_event.is_set():
-                        stream_obj.cancelled = True
-                        break
-                    if not line.strip():
-                        continue
-                    try:
-                        chunk = _json.loads(line)
-                    except _json.JSONDecodeError:
-                        continue
-                    token = chunk.get("response", "")
-                    stream_obj.tokens.append(token)
-
-                    if live_output and token:
-                        sys.stdout.write(f"{color}{token}{_RESET}")
-                        sys.stdout.flush()
-
-                    if chunk.get("done", False):
-                        stream_obj.done = True
-                        break
+        if stream_obj.provider == "openrouter":
+            await _stream_openrouter(model_name, prompt, system_prompt,
+                                     stream_obj, cancel_event, color, live_output)
+        else:
+            await _stream_ollama(model_name, prompt, system_prompt,
+                                 stream_obj, cancel_event, ollama_base, color, live_output)
     except asyncio.CancelledError:
         stream_obj.cancelled = True
     except Exception as e:
@@ -162,13 +239,12 @@ async def stream_model(
         stream_obj.elapsed_ms = (time.perf_counter() - t0) * 1000
         stream_obj.done = True
         if live_output:
-            elapsed = stream_obj.elapsed_ms
             status = "CANCELLED" if stream_obj.cancelled else "DONE"
-            print(f"\n{label} {_DIM}{status} ({elapsed:.0f}ms){_RESET}")
+            print(f"\n{label} {_DIM}{status} ({stream_obj.elapsed_ms:.0f}ms){_RESET}")
 
 
 async def supervise_race(
-    model_names: list[str],
+    model_names: "list[str] | list",
     prompt: str,
     system_prompt: str,
     ollama_base: str = "http://localhost:11434",
@@ -178,18 +254,27 @@ async def supervise_race(
     """
     Run all models in parallel. Monitor streams. Short-circuit if any
     model reaches SHORT_CIRCUIT_THRESHOLD confidence early.
+    Accepts either a list of model name strings or ModelInfo objects.
     Returns the winning Action and all stream objects for inspection.
     """
-    _assign_colors(model_names)
+    # Normalise: accept both plain strings and ModelInfo objects
+    from config import ModelInfo as _ModelInfo
+    models_info: list[_ModelInfo] = [
+        m if isinstance(m, _ModelInfo) else _ModelInfo(name=m, size_gb=0.0, provider="ollama")
+        for m in model_names
+    ]
+    names = [m.name for m in models_info]
+
+    _assign_colors(names)
     cancel_event = asyncio.Event()
-    streams = {name: ModelStream(model_name=name) for name in model_names}
+    streams = {m.name: ModelStream(model_name=m.name, provider=m.provider) for m in models_info}
 
     tasks = {
-        name: asyncio.create_task(
-            stream_model(name, prompt, streams[name], cancel_event, ollama_base, system_prompt,
+        m.name: asyncio.create_task(
+            stream_model(m.name, prompt, streams[m.name], cancel_event, ollama_base, system_prompt,
                          live_output=live_output)
         )
-        for name in model_names
+        for m in models_info
     }
 
     winner: Optional[Action] = None

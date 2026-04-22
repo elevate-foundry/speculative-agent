@@ -27,5 +27,12 @@ if ! curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then
     sleep 2
 fi
 
+# OpenRouter — optional free cloud models
+if [ -z "$OPENROUTER_API_KEY" ]; then
+    echo "[run.sh] Tip: set OPENROUTER_API_KEY to add free cloud models to the race."
+    echo "         Get a free key at https://openrouter.ai/keys"
+    echo "         e.g. export OPENROUTER_API_KEY=sk-or-..."
+fi
+
 echo "[run.sh] Starting agent..."
 exec .venv/bin/python agent.py "$@"

@@ -97,7 +97,7 @@ class Agent:
         max_steps is reached. Each step can retry up to max_retries_per_step times
         on failure before moving on.
         """
-        model_names = [m.name for m in self.models]
+        model_names = self.models  # pass full ModelInfo so provider is preserved
         last_result: Optional[ActionResult] = None
         consecutive_failures = 0
 
@@ -170,7 +170,6 @@ class Agent:
                 if consecutive_failures >= max_retries_per_step:
                     print(f"[agent] {consecutive_failures} consecutive failures. Stopping pipeline.")
                     break
-                print(f"[agent] Feeding error back to models for next step...\n")
                 # history already has the error — next iteration will include it in prompt
                 continue
 
@@ -215,8 +214,8 @@ class Agent:
         print("  ACTIVE MODELS")
         print("─" * 60)
         for m in self.models:
-            print(f"  {m.name:<35} {m.size_gb:.1f} GB  "
-                  f"warmup={m.warm_latency_ms:.0f}ms")
+            tag = "☁ openrouter" if m.provider == "openrouter" else f"⬡ local  {m.size_gb:.1f} GB"
+            print(f"  {m.name:<45} {tag}  warmup={m.warm_latency_ms:.0f}ms")
         print(f"\n  Hardware limit: {self.hw.max_parallel_models} concurrent")
         print("═" * 60)
 

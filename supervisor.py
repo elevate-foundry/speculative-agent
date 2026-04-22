@@ -230,6 +230,7 @@ async def _stream_direct(
     live_output: bool,
     provider_config: object,
     screenshot_b64: Optional[str] = None,
+    max_tokens: int = 1024,
 ) -> None:
     """Stream from a direct provider API. Supports both OpenAI-compat and native Anthropic /v1/messages."""
     import httpx

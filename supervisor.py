@@ -32,9 +32,9 @@ _DIM   = "\033[2m"
 _MODEL_COLORS: dict[str, str] = {}
 
 # Session-level 429 blacklist: model_name -> consecutive 429 count
-# Models that 429 twice in a row are dropped from the pool for the session.
+# A single 429 blacklists a model; the agent then replaces it from the full pool.
 _RATE_LIMITED: dict[str, int] = {}
-_RATE_LIMIT_THRESHOLD = 2
+_RATE_LIMIT_THRESHOLD = 1
 
 
 # Confidence threshold to short-circuit other models
@@ -361,9 +361,9 @@ async def stream_model(
     label = _model_label(model_name, stream_obj.provider)
     color = _MODEL_COLORS.get(model_name, "")
 
-    # Skip models blacklisted by repeated 429s
+    # Skip models blacklisted by a 429 — agent will replace them
     if _RATE_LIMITED.get(model_name, 0) >= _RATE_LIMIT_THRESHOLD:
-        stream_obj.error = "skipped (rate-limited this session)"
+        stream_obj.error = "rate-limited — will be replaced"
         stream_obj.done = True
         return
 

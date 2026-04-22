@@ -273,6 +273,29 @@ class Agent:
             )
             self.last_streams = streams
 
+            # Evict rate-limited models and backfill from the full pool
+            from supervisor import _RATE_LIMITED, _RATE_LIMIT_THRESHOLD
+            full_pool = await self._models_for_tier(tier)
+            evicted = [
+                m for m in active_models
+                if _RATE_LIMITED.get(m.name, 0) >= _RATE_LIMIT_THRESHOLD
+            ]
+            if evicted:
+                active_names = {m.name for m in active_models}
+                active_models = [m for m in active_models if m not in evicted]
+                candidates = [
+                    m for m in full_pool
+                    if m.name not in active_names
+                    and _RATE_LIMITED.get(m.name, 0) < _RATE_LIMIT_THRESHOLD
+                ]
+                for m in evicted:
+                    if candidates:
+                        replacement = candidates.pop(0)
+                        active_models.append(replacement)
+                        print(f"[agent] ↻ Replaced rate-limited {m.name!r} with {replacement.name!r}")
+                    else:
+                        print(f"[agent] ⚠ Rate-limited {m.name!r} evicted — no replacement available")
+
             if self.verbose:
                 print_race_summary(streams)
 

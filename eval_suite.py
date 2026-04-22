@@ -586,7 +586,7 @@ def run_suite(fast: bool = False, verbose: bool = True) -> dict:
         elif tc["expected"] == P and correct:
             tn += 1
 
-        results.append({**tc, "got": got, "correct": correct,
+        results.append({**tc, "tc": tc, "got": got, "correct": correct,
                         "lagrangian": d.lagrangian_value,
                         "blocking": d.blocking_regulations})
 
@@ -737,8 +737,8 @@ breakdown. All {n_benign} benign cases are correctly permitted (zero false posit
 \caption{{Extended compliance lattice evaluation ({total} cases, {acc_pct} accuracy).
   Zero false negatives in {n_reg} regulated cases:
   $\Pr[\text{{FNR}} \leq {p_upper_pct}] \geq 95\%$ by the rule of three.
-  Every regulation has $\geq 5$ cases; each includes reads (always permitted),
-  writes, destructive commands, and jurisdiction variants.}}
+  Every regulation has $\geq 5$ cases. Full test registry with per-case
+  anchors at \url{{{EVAL_PAGE_URL}}}.}}
 \label{{tab:eval-extended}}
 \begin{{tabular}}{{lrrr}}
 \toprule
@@ -773,8 +773,121 @@ Two systematic gaps remain in the \texttt{{infer\_context}} sensorium:
 \end{{enumerate}}"""
 
 
-PAPER_BEGIN = r"\subsection{Compliance Lattice Accuracy}"
-PAPER_END   = r"\subsection{Racing Efficiency}"
+EVAL_PAGE_URL = "https://elevate-foundry.github.io/speculative-agent/eval/"
+PAPER_BEGIN   = r"\subsection{Compliance Lattice Accuracy}"
+PAPER_END     = r"\subsection{Racing Efficiency}"
+
+
+def _case_anchor(tc: dict) -> str:
+    """Stable URL-safe anchor for a test case: reg-NNN."""
+    reg   = tc["regulation"].lower().replace("-", "").replace("/", "")
+    idx   = SUITE.index(tc) + 1
+    return f"{reg}-{idx:03d}"
+
+
+def generate_eval_html(results: list) -> str:
+    """Produce a self-contained HTML test-registry page with per-case anchors."""
+    by_reg: dict = {}
+    for r in results:
+        by_reg.setdefault(r["regulation"], []).append(r)
+
+    total   = len(results)
+    correct = sum(r["correct"] for r in results)
+    fn      = sum(1 for r in results
+                  if r["expected"] in ("BLOCK", "CONDITIONAL") and r["got"] == "PERMIT")
+
+    verdict_color = {"BLOCK": "#d73a49", "CONDITIONAL": "#e36209", "PERMIT": "#22863a"}
+
+    def badge(v: str) -> str:
+        c = verdict_color.get(v, "#555")
+        return f'<span style="background:{c};color:#fff;padding:1px 6px;border-radius:3px;font-size:.8em;font-family:monospace">{v}</span>'
+
+    def status_icon(r: dict) -> str:
+        return "✓" if r["correct"] else "✗"
+
+    reg_sections = []
+    for reg, cases in sorted(by_reg.items(), key=lambda x: (x[0] == "Benign", x[0])):
+        rows = []
+        for r in cases:
+            anchor = _case_anchor(r["tc"])
+            icon   = status_icon(r)
+            color  = "#22863a" if r["correct"] else "#d73a49"
+            rows.append(f"""    <tr id="{anchor}">
+      <td><a href="#{anchor}" style="color:#555;text-decoration:none">#{anchor}</a></td>
+      <td><code>{r['action_type']}</code></td>
+      <td style="max-width:340px;word-break:break-all"><code>{r['cmd']}</code></td>
+      <td>{r['desc']}</td>
+      <td>{badge(r['expected'])}</td>
+      <td>{badge(r['got'])}</td>
+      <td style="color:{color};font-weight:bold;text-align:center">{icon}</td>
+    </tr>""")
+        reg_pass = sum(r["correct"] for r in cases)
+        reg_fn   = sum(1 for r in cases
+                       if r["expected"] in ("BLOCK", "CONDITIONAL") and r["got"] == "PERMIT")
+        fn_cell  = f'<span style="color:#d73a49;font-weight:bold">{reg_fn} FN</span>' if reg_fn else "0 FN"
+        reg_sections.append(f"""  <section>
+    <h2 id="reg-{reg.lower().replace('-','').replace('/','')}">{reg}
+      <small style="font-weight:normal;color:#555;font-size:.7em">
+        {reg_pass}/{len(cases)} &nbsp;|&nbsp; {fn_cell}
+      </small>
+    </h2>
+    <table>
+      <thead><tr>
+        <th>ID</th><th>Action</th><th>Command / Path</th><th>Description</th>
+        <th>Expected</th><th>Got</th><th>✓</th>
+      </tr></thead>
+      <tbody>
+{"".join(rows)}
+      </tbody>
+    </table>
+  </section>""")
+
+    paper_url = "https://elevate-foundry.github.io/speculative-agent/"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compliance Lattice — Test Registry</title>
+<link rel="canonical" href="{EVAL_PAGE_URL}">
+<style>
+  body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+        max-width:1100px;margin:0 auto;padding:1.5rem 1rem;color:#24292e}}
+  h1{{border-bottom:1px solid #e1e4e8;padding-bottom:.5rem}}
+  h2{{margin-top:2rem;border-bottom:1px solid #e1e4e8;padding-bottom:.3rem}}
+  table{{width:100%;border-collapse:collapse;margin:.75rem 0;font-size:.85em}}
+  th{{background:#f6f8fa;text-align:left;padding:.4rem .6rem;
+      border:1px solid #d1d5da;white-space:nowrap}}
+  td{{padding:.35rem .6rem;border:1px solid #e1e4e8;vertical-align:top}}
+  tr:hover td{{background:#f6f8fa}}
+  .summary{{background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;
+             padding:.75rem 1rem;margin:1rem 0;font-size:.9em}}
+  a{{color:#0366d6}}
+  nav a{{margin-right:1rem}}
+</style>
+</head>
+<body>
+<nav><a href="{paper_url}">← Paper</a></nav>
+<h1>Compliance Lattice — Test Registry</h1>
+<div class="summary">
+  <strong>{correct}/{total} cases passing</strong> &nbsp;|&nbsp;
+  <strong style="color:{'#22863a' if fn == 0 else '#d73a49'}">{fn} false negatives</strong>
+  &nbsp;|&nbsp; Every case is individually addressable by anchor (e.g.
+  <a href="#hipaa-001">#hipaa-001</a>).
+  Results are generated by running <code>python eval_suite.py --html</code>
+  and are authoritative: this page <em>is</em> the evaluation.
+  &nbsp;|&nbsp; <a href="{paper_url}#sec-compliance-lattice-accuracy">See paper §Eval</a>
+</div>
+
+{"".join(reg_sections)}
+
+<footer style="margin-top:3rem;padding-top:1rem;border-top:1px solid #e1e4e8;
+               font-size:.8em;color:#586069">
+  Generated from <code>eval_suite.py</code> — {total} cases,
+  <a href="https://github.com/elevate-foundry/speculative-agent">source</a>
+</footer>
+</body>
+</html>"""
 
 
 def patch_paper(tex_path: str, results: list) -> None:
@@ -804,6 +917,7 @@ if __name__ == "__main__":
     parser.add_argument("--fast",        action="store_true", help="Stop on first failure")
     parser.add_argument("--stats",       action="store_true", help="Summary only")
     parser.add_argument("--latex",       action="store_true", help="Print generated LaTeX section")
+    parser.add_argument("--html",        action="store_true", help="Write eval/index.html test registry")
     parser.add_argument("--patch-paper", action="store_true", help="Auto-patch paper/main.tex with live results")
     parser.add_argument("--quiet",       action="store_true")
     args = parser.parse_args()
@@ -812,6 +926,12 @@ if __name__ == "__main__":
 
     if args.latex:
         print(generate_paper_section(r["results"]))
+
+    if args.html:
+        out = pathlib.Path(__file__).parent / "eval" / "index.html"
+        out.parent.mkdir(exist_ok=True)
+        out.write_text(generate_eval_html(r["results"]))
+        print(f"✓ Wrote {out}")
 
     if args.patch_paper:
         tex = pathlib.Path(__file__).parent / "paper" / "main.tex"

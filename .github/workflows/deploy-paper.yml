@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'paper/**'
+      - 'eval_suite.py'
+      - 'compliance.py'
       - '.github/workflows/deploy-paper.yml'
   workflow_dispatch:
 
@@ -23,18 +25,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
       - name: Install pandoc
         run: sudo apt-get install -y pandoc
 
-      - name: Build HTML
+      - name: Run eval suite — patch paper + generate eval page
+        run: python eval_suite.py --quiet --html --patch-paper
+
+      - name: Build paper HTML
         run: make html
         working-directory: paper
 
       - name: Assemble site
         run: |
-          mkdir -p _site
+          mkdir -p _site/eval
           cp paper/main.html _site/index.html
           cp paper/style.css _site/style.css
+          cp eval/index.html _site/eval/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

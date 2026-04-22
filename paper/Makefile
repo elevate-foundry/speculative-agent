@@ -42,9 +42,9 @@ clean:
 
 # ── Run eval suite and auto-patch main.tex with live results ───────────────
 paper-eval:
-	cd .. && .venv/bin/python eval_suite.py --quiet --patch-paper
+	cd .. && .venv/bin/python eval_suite.py --quiet --html --patch-paper
 	$(MAKE) html
-	@echo "\n✓ paper-eval complete — main.tex patched and HTML rebuilt"
+	@echo "\n✓ paper-eval complete — main.tex patched, eval/index.html written, HTML rebuilt"
 
 # ── Install BasicTeX (macOS, ~100MB) ───────────────────────────────────────
 install-tex:

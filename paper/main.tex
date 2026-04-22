@@ -57,10 +57,10 @@ under mild assumptions on model calibration.
 
 Second, we introduce a \emph{tropical compliance lattice}: a regulatory constraint
 system modeled as a linear program over the tropical semiring $(\R \cup \{-\infty\},
-\max, +)$ that must be satisfied before any irreversible action executes. The system
-computes a Lagrangian $\mathcal{L}(a) = \sum_i \lambda_i \cdot c_i(a)$ across nine
+\max, +)$ that must be satisfied before any irreversible action executes. The system computes a compliance Lagrangian $\mathcal{L}(a) = \bigoplus_i (\lambda_i \otimes c_i(a))
+= \max_i \lambda_i \cdot c_i(a)$ across ten
 regulatory frameworks (SOC~I/II/III, GDPR, CCPA, HIPAA, GLBA, FCRA, Metro~II, CDIA,
-ISO~27001). An action is permitted if and only if $\mathcal{L}(a) = 0$. We show this
+ISO~27001, PIPL). An action is permitted if and only if $\mathcal{L}(a) = 0$. We show this
 is equivalent to finding a feasible point in a constraint polytope, and that the
 tropical structure allows efficient computation via max-plus algebra.
 
@@ -263,13 +263,18 @@ and Block respectively.
 \subsection{Lagrangian Formulation}
 
 \begin{definition}[Compliance Lagrangian]
-The compliance Lagrangian for action $a$ with data context $d$ is:
+The compliance Lagrangian for action $a$ with data context $d$ is the tropical
+linear form over the max-plus semiring $(\Rmax, \tplus, \ttimes)$:
 \begin{equation}
-  \mathcal{L}(a, d) = \sum_{i=1}^{k} \lambda_i \cdot v_i(a, d)
+  \mathcal{L}(a, d) = \bigoplus_{i=1}^{k} \bigl(\lambda_i \otimes v_i(a, d)\bigr)
+                    = \max_{i=1,\ldots,k} \lambda_i \cdot v_i(a, d)
   \label{eq:lagrangian}
 \end{equation}
-where $\lambda_i > 0$ is the weight of regulation $r_i$. By convention, SOC~II
-audit-log violations carry $\lambda_i = 2$ (non-negotiable); all others $\lambda_i = 1$.
+where $\lambda_i > 0$ is the weight of regulation $r_i$ and $\otimes$ denotes
+tropical multiplication (ordinary addition). By convention, SOC~II audit-log
+violations carry $\lambda_i = 2$ (non-negotiable); all others $\lambda_i = 1$.
+The tropical max ensures a single \textbf{Block} verdict with $v_i = 1$
+dominates all \textbf{Permit} verdicts ($v_j = 0$): $\max(\lambda_i, 0) = \lambda_i > 0$.
 \end{definition}
 
 \begin{theorem}[Compliance Condition]
@@ -282,10 +287,12 @@ Equivalently, $a$ is compliant iff no applicable regulation returns $\mathbf{Blo
 \end{theorem}
 
 \begin{proof}
-$(\Rightarrow)$ If any $v_i = 1$ (Block), then $\lambda_i \cdot v_i \geq 1 > 0$, so
-$\mathcal{L} > 0$. $(\Leftarrow)$ If $\mathcal{L} = 0$ and all $\lambda_i > 0$, then
-all $v_i = 0$ (all Permit). Conditional verdicts ($v_i = 0.5$) contribute $0.5\lambda_i > 0$,
-so $\mathcal{L} = 0$ implies no Conditional verdicts remain unresolved.
+$(\Rightarrow)$ If any $v_i = 1$ (Block), then $\lambda_i \cdot v_i \geq 1 > 0$,
+so $\mathcal{L} = \max_i \lambda_i v_i \geq 1 > 0$.
+$(\Leftarrow)$ If $\mathcal{L} = 0$, then $\max_i \lambda_i v_i = 0$.
+Since all $\lambda_i > 0$, this forces $v_i = 0$ (Permit) for every $i$.
+Conditional verdicts ($v_i = 0.5$) contribute $0.5\lambda_i > 0$, so
+$\mathcal{L} = 0$ implies no Conditional or Block verdicts are present.
 \end{proof}
 
 \subsection{Tropical Semiring Structure}
@@ -296,15 +303,18 @@ The compliance lattice is naturally expressed over the tropical semiring. Define
   w_i(a) = \lambda_i \cdot v_i(a, d) \in \Rmax
 \end{equation}
 
-The overall compliance decision is the tropical sum of all regulatory costs:
+The overall compliance Lagrangian is precisely the tropical linear form:
 \begin{equation}
   \mathcal{L}(a) = \bigoplus_{i=1}^{k} w_i(a) = \max_i w_i(a)
 \end{equation}
 
-This is the \emph{tropical linear form} of the decision problem. The compliance
-condition $\mathcal{L}(a) = 0$ is equivalent to finding a point in the tropical
-halfspace $\{a : \bigoplus_i w_i(a) \leq \mathbf{1}\}$ where $\mathbf{1} = 0$ is
-the tropical multiplicative identity.
+This is the canonical \emph{tropical linear form} of the decision problem.
+The compliance condition $\mathcal{L}(a) = 0$ is equivalent to finding a point
+in the tropical halfspace $\{a : \bigoplus_i w_i(a) \leq \mathbf{1}\}$ where
+$\mathbf{1} = 0$ is the tropical multiplicative identity. Crucially, the max
+operator (not a classical sum) ensures that adding more \textbf{Permit}
+constraints cannot dilute a \textbf{Block}: the blocking regulation is always
+the dominant term.
 
 \begin{proposition}[Lattice Dominance]
 In the tropical structure, a single $\mathbf{Block}$ verdict dominates all
@@ -771,23 +781,26 @@ PIPL               &     6 &     6 &          0 \\
 
 \paragraph{Lagrangian distribution.}
 Across all regulated cases: $\mathcal{L} = 0$ for all 76 benign actions
-($\mathbf{Permit}$); $\mathcal{L} \in [0.5, 1.0]$ for conditional cases
-(GDPR, CCPA, ISO-27001 mitigations); $\mathcal{L} \geq 1.5$ for hard blocks
-(SOC-II, HIPAA, GLBA, FCRA). The SOC-II double-weight ($\lambda = 2$)
-produces the maximum observed $\mathcal{L} = 2.0$ for audit-log deletion ---
-correctly dominating all other constraints.
+($\mathbf{Permit}$); $\mathcal{L} = 0.5$ for conditional cases
+(GDPR, CCPA, ISO-27001 mitigations, $\lambda=1$, $v=0.5$);
+$\mathcal{L} = 1.0$ for standard hard blocks (HIPAA, GLBA, FCRA, PIPL, $\lambda=1$,
+$v=1$). The SOC-II double-weight ($\lambda = 2$)
+produces $\mathcal{L} = 2.0$ for audit-log deletion ---
+correctly dominating all other constraints under the tropical max.
 
 \paragraph{Known limitations.}
 Two systematic gaps remain in the \texttt{infer\_context} sensorium:
 \begin{enumerate}
-  \item \textbf{HIPAA read access:} \texttt{bash cat} on a PHI path currently
-  blocks because the HIPAA constraint fires on data type regardless of access
-  mode. A read-exemption (analogous to the SOC-II read-only bypass) is
-  needed and tagged as future work.
-  \item \textbf{PIPL cross-border transfer:} Sending Chinese personal data to
-  US providers should hard-block under PIPL Art.~38 (CAC approval required).
-  Currently ISO-27001 fires a $\mathbf{Conditional}$; a dedicated PIPL
-  constraint is future work.
+  \item \textbf{HIPAA read access (resolved):} \texttt{bash cat} on a PHI path
+  previously blocked because the HIPAA constraint fired on data type regardless
+  of access mode. A read-exemption (analogous to the SOC-II read-only bypass)
+  is now implemented: \texttt{read\_file} and read-only bash commands on PHI
+  paths are permitted, while write/delete operations retain the 6-year
+  retention block.
+  \item \textbf{PIPL cross-border transfer (resolved):} A dedicated PIPL
+  constraint now hard-blocks any write or delete action on Chinese
+  personal data paths under PIPL Art.~38 (CAC security assessment required),
+  replacing the previous ISO-27001 $\mathbf{Conditional}$ fallback.
 \end{enumerate}
 
 \subsection{Racing Efficiency}

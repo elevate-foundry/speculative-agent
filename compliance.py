@@ -146,6 +146,8 @@ def _check_hipaa(ctx: DataContext, action_type: str) -> ConstraintResult:
     """HIPAA: PHI must be retained 6 years from creation or last effective date."""
     if not ctx.contains_phi:
         return ConstraintResult("HIPAA", Verdict.PERMIT, "HIPAA not applicable (no PHI detected).")
+    if action_type in _READ_ACTIONS or (action_type == "bash" and _is_bash_read_only({})):
+        return ConstraintResult("HIPAA", Verdict.PERMIT, "HIPAA: read access to PHI permitted; write/delete restricted.")
 
     min_retention = 365 * 6  # 6 years
     if ctx.created_days_ago is not None and ctx.created_days_ago < min_retention:
@@ -224,6 +226,19 @@ def _is_destructive_action(action_type: str, payload: dict = None) -> bool:
     return True
 
 
+def _check_pipl(ctx: DataContext, action_type: str) -> ConstraintResult:
+    """PIPL (China): cross-border transfer of Chinese personal data requires CAC approval (Art.38)."""
+    if ctx.subject_jurisdiction != "CN" or not ctx.contains_pii:
+        return ConstraintResult("PIPL", Verdict.PERMIT, "PIPL not applicable.")
+    if action_type in _READ_ACTIONS or (action_type == "bash" and _is_bash_read_only({})):
+        return ConstraintResult("PIPL", Verdict.PERMIT, "PIPL: read access permitted.")
+    return ConstraintResult(
+        "PIPL", Verdict.BLOCK,
+        "PIPL Art.38: cross-border transfer of Chinese personal data requires "
+        "CAC security assessment or standard contract. Transfer blocked pending approval.",
+    )
+
+
 def _check_iso27001(ctx: DataContext, action_type: str, payload: dict = None) -> ConstraintResult:
     """ISO 27001: A.8.3.2 disposal + A.8.2.3 handling of sensitive assets."""
     is_sensitive = ctx.contains_pii or ctx.contains_phi or ctx.contains_financial
@@ -260,6 +275,7 @@ _CONSTRAINTS = [
     _check_glba,
     _check_fcra,
     _check_metro2_cdia,
+    _check_pipl,
     _check_iso27001,
 ]
 
@@ -291,9 +307,10 @@ def evaluate(action_type: str, payload: dict, context: DataContext) -> Complianc
                else fn(context, action_type)
                for fn in _CONSTRAINTS]
 
-    # Tropical semiring (max-plus): overall score = max of weighted verdicts
-    # In standard interpretation: any BLOCK = blocked, else sum of weights
-    lagrangian = sum(r.lagrangian_lambda * r.verdict.lagrangian_weight for r in results)
+    # Tropical semiring (max-plus): ℒ = ⊕ᵢ (λᵢ ⊗ vᵢ) = max_i (λᵢ · vᵢ)
+    # A single BLOCK dominates all PERMITs: max(λ·1, 1·0) = λ > 0
+    # CONDITIONAL (v=0.5) contributes 0.5·λ; only PERMIT (v=0) gives 0
+    lagrangian = max((r.lagrangian_lambda * r.verdict.lagrangian_weight for r in results), default=0.0)
     blocking = [r.regulation for r in results if r.verdict == Verdict.BLOCK]
     conditional = [r for r in results if r.verdict == Verdict.CONDITIONAL]
 
@@ -311,7 +328,7 @@ def evaluate(action_type: str, payload: dict, context: DataContext) -> Complianc
                 f"Conditions: {'; '.join(r.regulation for r in conditional)}."
             )
         else:
-            justification = f"Action PERMITTED. All {len(results)} compliance constraints satisfied. L=0.00."
+            justification = f"Action PERMITTED. All {len(results)} compliance constraints satisfied. \u2112=0.00 (tropical max)."
     else:
         justification = (
             f"Action BLOCKED by {len(blocking)} regulation(s): {', '.join(blocking)}. "

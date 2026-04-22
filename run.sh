@@ -4,6 +4,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Load .env if present (never committed — put API keys here)
+if [ -f ".env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
+
 # Create venv if it doesn't exist
 if [ ! -d ".venv" ]; then
     echo "[run.sh] Creating virtual environment..."

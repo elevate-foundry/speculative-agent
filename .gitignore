@@ -7,3 +7,6 @@ __pycache__/
 *.jpg
 test_dir/
 /tmp/
+.agent_history
+.env
+*.jsonl

@@ -25,10 +25,13 @@ import atexit
 # Enable readline (arrow keys, Ctrl-R history search) as early as possible
 try:
     import readline as _rl
+    # Prefer ~/.agent_history; fall back to project-local if home is restricted
     _HISTORY_FILE = os.path.expanduser("~/.agent_history")
+    if not os.access(os.path.dirname(_HISTORY_FILE) or ".", os.W_OK):
+        _HISTORY_FILE = os.path.join(os.path.dirname(__file__), ".agent_history")
     try:
         _rl.read_history_file(_HISTORY_FILE)
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError, OSError):
         pass
     _rl.set_history_length(500)
     atexit.register(_rl.write_history_file, _HISTORY_FILE)

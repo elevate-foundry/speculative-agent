@@ -377,6 +377,8 @@ async def main():
                              "Can also set via AGENT_BUDGET env var.")
     parser.add_argument("--local", action="store_true",
                         help="Include local Ollama models in the race alongside cloud models.")
+    parser.add_argument("--autonomy", choices=["off", "normal", "full"], default=None,
+                        help="off=approve all | normal=approve only destructive (default) | full=fully autonomous")
     args = parser.parse_args()
 
     if args.budget:
@@ -388,6 +390,11 @@ async def main():
         os.environ["AGENT_LOCAL"] = "1"
         import config as _cfg
         _cfg.USE_LOCAL_MODELS = True
+
+    if args.autonomy:
+        os.environ["AGENT_AUTONOMY"] = args.autonomy
+        import executor as _exe
+        _exe.AUTONOMY = args.autonomy
 
     print("Discovering and warming up Ollama models...")
     models, hw = await discover_and_warmup(verbose=True)

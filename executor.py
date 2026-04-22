@@ -17,8 +17,54 @@ from typing import Any, Optional
 
 ALLOWED_ACTION_TYPES = {"bash", "python_exec", "pyautogui", "playwright", "write_file", "read_file", "noop"}
 
-# Actions that are always interactive (never auto-approved)
-ALWAYS_CONFIRM = {"bash", "python_exec", "pyautogui", "playwright", "write_file"}
+# Autonomy levels:
+#   off         — approve everything (original behaviour)
+#   normal      — auto-approve safe actions; confirm only destructive ones  (default)
+#   full        — approve everything automatically, no prompts at all
+import os as _os
+AUTONOMY = _os.environ.get("AGENT_AUTONOMY", "normal").lower()
+
+# Bash/python patterns that are considered destructive (require confirmation)
+_DESTRUCTIVE_PATTERNS = [
+    r"rm\s+-[rf]",          # rm -rf
+    r"rm\s+",               # any rm
+    r"\bmkfs\b",            # format disk
+    r"\bdd\b.*of=",          # disk write
+    r"\bshred\b",
+    r"\bchmod\b.*777",
+    r"> /",                  # redirect to system path
+    r"sudo\s+",              # sudo anything
+    r"\bkill\b",
+    r"\bpkill\b",
+    r"\breboot\b",
+    r"\bshutdown\b",
+    r"\bcurl\b.*\|.*sh",    # curl | sh
+    r"\bwget\b.*\|.*sh",
+    r"DROP\s+TABLE",         # SQL destructive
+    r"DELETE\s+FROM",
+    r"truncate",
+]
+
+import re as _re
+_DESTRUCTIVE_RE = _re.compile("|".join(_DESTRUCTIVE_PATTERNS), _re.IGNORECASE)
+
+
+def _is_destructive(action: "Action") -> bool:
+    """Return True if the action could irreversibly damage the system."""
+    t = action.action_type
+    p = action.payload
+
+    if t == "write_file":
+        # Overwriting sensitive system paths is destructive
+        path = str(p.get("path", ""))
+        danger_prefixes = ("/etc/", "/usr/", "/bin/", "/sbin/", "/System/", "/boot/")
+        return any(path.startswith(pfx) for pfx in danger_prefixes)
+
+    if t in ("bash", "python_exec"):
+        code = p.get("command", "") or p.get("code", "")
+        return bool(_DESTRUCTIVE_RE.search(code))
+
+    return False  # playwright, pyautogui, read_file, noop — never destructive
 
 
 @dataclass
@@ -106,13 +152,28 @@ def _prompt_approval(action: Action) -> "bool | str":
 
 
 def execute(action: Action, auto_approve: bool = False) -> ActionResult:
-    if action.action_type in ALWAYS_CONFIRM and not auto_approve:
+    needs_confirm = False
+
+    if not auto_approve:
+        if AUTONOMY == "off":
+            # Old behaviour: confirm everything except read_file / noop
+            needs_confirm = action.action_type not in ("read_file", "noop")
+        elif AUTONOMY == "normal":
+            # Only confirm genuinely destructive actions
+            needs_confirm = _is_destructive(action)
+        elif AUTONOMY == "full":
+            needs_confirm = False
+
+    if needs_confirm:
         approved = _prompt_approval(action)
         if approved is False:
             return ActionResult(success=False, output="", error="User rejected action.")
         if isinstance(approved, str):
             return ActionResult(success=False, output="", error="User provided feedback.",
                                 user_feedback=approved)
+    elif action.action_type not in ("read_file", "noop") and AUTONOMY != "off":
+        # Show what's running without asking
+        print(f"\n  \u25b6 Auto-running [{action.action_type}]: {action.description}")
 
     try:
         if action.action_type == "noop":

@@ -243,7 +243,7 @@ Let $\mathcal{R} = \{r_1, \ldots, r_k\}$ be the set of applicable regulatory
 frameworks, and let $a \in \mathcal{A}$ be a proposed action (e.g., file deletion,
 database write). Each regulation $r_i$ induces a constraint function:
 \begin{equation}
-  c_i : \mathcal{A} \times \mathcal{D} \to \{\textsc{Permit}, \textsc{Conditional}, \textsc{Block}\}
+  c_i : \mathcal{A} \times \mathcal{D} \to \{\mathbf{Permit},\, \mathbf{Conditional},\, \mathbf{Block}\}
 \end{equation}
 where $\mathcal{D}$ is the space of data contexts (jurisdiction, retention age,
 data type, backup status, etc.).
@@ -269,7 +269,7 @@ Action $a$ is compliant with data context $d$ if and only if:
 \begin{equation}
   \mathcal{L}(a, d) = 0
 \end{equation}
-Equivalently, $a$ is compliant iff no applicable regulation returns \textsc{Block}.
+Equivalently, $a$ is compliant iff no applicable regulation returns $\mathbf{Block}$.
 \end{theorem}
 
 \begin{proof}
@@ -298,8 +298,8 @@ halfspace $\{a : \bigoplus_i w_i(a) \leq \mathbf{1}\}$ where $\mathbf{1} = 0$ is
 the tropical multiplicative identity.
 
 \begin{proposition}[Lattice Dominance]
-In the tropical structure, a single \textsc{Block} verdict dominates all
-\textsc{Permit} verdicts:
+In the tropical structure, a single $\mathbf{Block}$ verdict dominates all
+$\mathbf{Permit}$ verdicts:
 \begin{equation}
   w_{\text{Block}} \tplus w_{\text{Permit}} = \max(1, 0) = 1 \neq 0
 \end{equation}
@@ -448,6 +448,41 @@ This isomorphism has practical consequences: a compliance decision can be
 giving visually impaired compliance officers an immediate tactile readout of
 which regulations an action violates. The space character means ``go'';
 any raised dot means ``stop and review dot $i$''.
+
+\subsection{Extension to 8-Dot Computer Braille}
+
+The classical 6-dot cell supports $2^6 = 64$ characters — sufficient for
+lower-case letters and basic punctuation. \emph{8-dot computer Braille}
+(ISO 17548, used in braille terminals and Unicode Braille Patterns
+\texttt{U+2800}--\texttt{U+28FF}) adds two dots below the standard cell:
+\begin{equation}
+  \mathcal{B}_8 = \mathbb{B}^8, \quad |\mathcal{B}_8| = 2^8 = 256
+\end{equation}
+This covers the full Latin-1 character set and, crucially for our framework,
+provides enough capacity to encode \emph{nine} regulatory verdicts with
+one spare bit:
+\begin{equation}
+  k = 9 \leq 8 + 1\text{ (spare)} \implies
+  \mathcal{R} \hookrightarrow \mathcal{B}_8
+\end{equation}
+The embedding assigns the two new dots (7 and 8) to Metro~2/CDIA and
+ISO~27001 — the two most recently added regulatory frameworks — which
+tidily reflects the historical layering: the original 6-dot cell handles
+the foundational regulations (SOC~II, GDPR, HIPAA, CCPA, FCRA, GLBA),
+while the computer extension handles the data-format and information-security
+standards that post-date Braille's original design.
+
+\begin{corollary}[8-Dot Completeness]
+The 8-dot Braille lattice $\mathcal{B}_8$ is sufficient to encode any
+compliance decision vector for the nine regulatory frameworks in our
+current implementation, with $2^8 - 9 = 247$ unused codepoints reserved
+for future regulatory expansion.
+\end{corollary}
+
+This has a direct engineering consequence: the compliance state of any agent
+action can be serialized as a single Unicode character in the Braille Patterns
+block, transmitted over any channel that carries UTF-8, rendered on a refreshable
+Braille display, and reconstructed with a single byte comparison.
 
 \subsection{Braille Grade 2 as a Compression Lattice}
 

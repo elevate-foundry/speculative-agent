@@ -16,14 +16,16 @@ pdf: $(TEX) $(BIB)
 	@echo "\n✓ Built $(MAIN).pdf"
 
 # ── HTML via pandoc (available now) ────────────────────────────────────────
-html: $(TEX) $(BIB)
+html: $(TEX) $(BIB) style.css header.html
 	pandoc $(TEX) \
 	  --bibliography=$(BIB) \
 	  --citeproc \
 	  --standalone \
 	  --mathjax \
 	  --toc \
-	  --metadata title="Speculative Agent" \
+	  --css=style.css \
+	  --include-before-body=header.html \
+	  --metadata title="Speculative Racing with Tropical Compliance Lattices" \
 	  -o $(MAIN).html
 	@echo "\n✓ Built $(MAIN).html — open with: open $(MAIN).html"
 

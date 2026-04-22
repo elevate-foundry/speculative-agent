@@ -258,16 +258,34 @@ async def list_openrouter_models(tier: str = "free") -> list[ModelInfo]:
 
         catalog = {m["id"]: m for m in all_models}
 
+        # Non-chat model families to exclude — audio, image, video, embedding, reranker
+        _EXCLUDE_KEYWORDS = (
+            "lyria", "imagen", "dall-e", "whisper", "tts", "embed",
+            "rerank", "clip", "stable-diffusion", "midjourney", "sora",
+            "audio", "speech", "music", "vision-only",
+        )
+
+        def _is_chat_model(m: dict) -> bool:
+            mid = m["id"].lower()
+            # OpenRouter marks modalities; if present, must include 'text' output
+            arch = m.get("architecture") or {}
+            modalities = arch.get("output_modalities") or arch.get("modalities") or []
+            if modalities and "text" not in modalities:
+                return False
+            return not any(kw in mid for kw in _EXCLUDE_KEYWORDS)
+
         if env_override:
             wanted = {m.strip() for m in env_override.split(",") if m.strip()}
-            free_pool = [m for m in all_models if m["id"] in wanted]
+            free_pool = [m for m in all_models if m["id"] in wanted and _is_chat_model(m)]
             paid_ids: list[str] = []
         else:
-            # Free pool: :free tag or zero prompt cost
+            # Free pool: :free tag or zero prompt cost, chat models only
             free_pool = [
                 m for m in all_models
-                if ":free" in m["id"]
-                or float((m.get("pricing") or {}).get("prompt", "1") or "1") == 0.0
+                if _is_chat_model(m) and (
+                    ":free" in m["id"]
+                    or float((m.get("pricing") or {}).get("prompt", "1") or "1") == 0.0
+                )
             ]
             free_pool.sort(key=lambda m: int(m.get("context_length") or 0), reverse=True)
             free_pool = free_pool[:OPENROUTER_MAX_MODELS]

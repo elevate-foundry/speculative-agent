@@ -31,6 +31,11 @@ _DIM   = "\033[2m"
 
 _MODEL_COLORS: dict[str, str] = {}
 
+# Session-level 429 blacklist: model_name -> consecutive 429 count
+# Models that 429 twice in a row are dropped from the pool for the session.
+_RATE_LIMITED: dict[str, int] = {}
+_RATE_LIMIT_THRESHOLD = 2
+
 
 # Confidence threshold to short-circuit other models
 SHORT_CIRCUIT_THRESHOLD = 0.85
@@ -308,6 +313,12 @@ async def stream_model(
     label = _model_label(model_name, stream_obj.provider)
     color = _MODEL_COLORS.get(model_name, "")
 
+    # Skip models blacklisted by repeated 429s
+    if _RATE_LIMITED.get(model_name, 0) >= _RATE_LIMIT_THRESHOLD:
+        stream_obj.error = "skipped (rate-limited this session)"
+        stream_obj.done = True
+        return
+
     t0 = time.perf_counter()
     if live_output:
         print(f"\n{label} starting...")
@@ -326,7 +337,15 @@ async def stream_model(
     except asyncio.CancelledError:
         stream_obj.cancelled = True
     except Exception as e:
-        stream_obj.error = str(e)
+        err = str(e)
+        stream_obj.error = err
+        # Track 429s for blacklisting
+        if "429" in err:
+            _RATE_LIMITED[model_name] = _RATE_LIMITED.get(model_name, 0) + 1
+            if _RATE_LIMITED[model_name] >= _RATE_LIMIT_THRESHOLD:
+                print(f"\n{label} ⚠ rate-limited {_RATE_LIMIT_THRESHOLD}x — dropping from session pool")
+        else:
+            _RATE_LIMITED[model_name] = 0  # reset on non-429 error
         stream_obj.done = True
     finally:
         stream_obj.elapsed_ms = (time.perf_counter() - t0) * 1000

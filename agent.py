@@ -163,6 +163,9 @@ class Agent:
 
         last_result: Optional[ActionResult] = None
         consecutive_failures = 0
+        last_action_sig: Optional[str] = None
+        repeat_count = 0
+        MAX_REPEATS = 3
 
         for step in range(1, max_steps + 1):
             print(f"\n{'━'*60}")
@@ -261,20 +264,39 @@ class Agent:
             }
             self.history.append(entry)
 
+            # Detect repeating action loops
+            action_sig = f"{action.action_type}:{action.description[:60]}"
+            if action_sig == last_action_sig:
+                repeat_count += 1
+                if repeat_count >= MAX_REPEATS:
+                    print(f"[agent] ⚠ Same action repeated {MAX_REPEATS}x — injecting hint and breaking loop")
+                    self.history.append({
+                        "task": task, "step": step, "action_type": "user_feedback",
+                        "model": "system", "description": "loop_break",
+                        "success": True, "tier": tier, "cost_usd": 0.0,
+                        "result": f"SYSTEM: You have repeated '{action.action_type}' {MAX_REPEATS} times. "
+                                  f"The task requires a DIFFERENT action now. "
+                                  f"If you wrote a file, the next step must be bash/playwright/pyautogui to OPEN it. "
+                                  f"If you are stuck, emit noop to stop.",
+                        "error": None,
+                    })
+                    repeat_count = 0
+            else:
+                repeat_count = 0
+            last_action_sig = action_sig
+
             if result.success:
                 print(f"\n[agent] ✓ Step {step} succeeded")
                 if result.output:
                     print(result.output[:1000])
+                consecutive_failures = 0
             else:
                 print(f"\n[agent] ✗ Step {step} failed: {result.error}")
                 consecutive_failures += 1
                 if consecutive_failures >= max_retries_per_step:
                     print(f"[agent] {consecutive_failures} consecutive failures. Stopping pipeline.")
                     break
-                # history already has the error — next iteration will include it in prompt
                 continue
-
-            consecutive_failures = 0
 
         else:
             print(f"\n[agent] Reached max steps ({max_steps}). Pipeline stopped.")

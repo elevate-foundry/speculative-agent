@@ -19,6 +19,15 @@ the operative provisions that the lattice evaluates.
 | `nist_csf.md` | NIST CSF 2.0 | Core functions and categories |
 | `cdia.md` | CDIA Standards | Metro 2 compliance requirements |
 
+## Provider Terms of Service
+
+| File | Provider | Key Agentic Provisions |
+|------|----------|----------------------|
+| `openai_terms.md` | OpenAI API | §7.1 Human Oversight, §7.2 Action Logging |
+| `anthropic_terms.md` | Anthropic Claude API | §6.2 Minimal Footprint, §6.3 Prompt Injection |
+| `google_terms.md` | Google Gemini API | §7.2 Human Review, ISO 27001 / SOC 2 |
+| `openrouter_terms.md` | OpenRouter | §2.1 Pass-Through Compliance (all providers) |
+
 
 > **Note:** These are excerpts for machine-readable compliance evaluation.
 > For legal advice, consult qualified counsel.

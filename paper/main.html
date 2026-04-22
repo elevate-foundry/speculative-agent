@@ -174,8 +174,7 @@ id="toc-tropical-semiring-structure">Tropical Semiring
 Structure</a></li>
 <li><a href="#constraint-hierarchy"
 id="toc-constraint-hierarchy">Constraint Hierarchy</a></li>
-<li><a href="#audit-log-integrity" id="toc-audit-log-integrity">Audit
-Log Integrity</a></li>
+<li><a href="#sec:audit" id="toc-sec:audit">Audit Log Integrity</a></li>
 </ul></li>
 <li><a href="#sec:braille" id="toc-sec:braille">The Braille Lattice
 Isomorphism</a>
@@ -496,14 +495,125 @@ specificity and data type:</p>
 <p>SOC II sits at the top of the lattice as the universal audit
 requirement. ISO 27001 forms the floor as the general information
 security standard applicable to all data.</p>
-<h2 id="audit-log-integrity">Audit Log Integrity</h2>
-<p>All compliance decisions are recorded in an append-only log with a
-SHA-256 hash chain: <span class="math display">\[\begin{equation}
-  h_t = \text{SHA256}(h_{t-1} \,\|\, \text{entry}_t)
-\end{equation}\]</span> where <span class="math inline">\(h_0 =
-0^{64}\)</span> (genesis hash). This satisfies SOC II CC6.1
-tamper-evidence requirements: any modification to a historical entry
-invalidates all subsequent hashes.</p>
+<h2 id="sec:audit">Audit Log Integrity</h2>
+<p>All agent actions are recorded in an append-only JSONL audit log
+satisfying SOC II CC6.1 (<em>“The entity implements logical access
+security software, infrastructure, and architectures over protected
+information assets”</em>). Each log entry <span
+class="math inline">\(e_t\)</span> contains:</p>
+<ul>
+<li><p><strong>Timestamp</strong> — ISO 8601 with timezone (<span
+class="math inline">\(\pm\)</span>1s accuracy)</p></li>
+<li><p><strong>Identity</strong> — model name, provider, and autonomy
+level</p></li>
+<li><p><strong>Action</strong> — type and SHA-256 hash of payload (never
+raw values, which may contain credentials or PII)</p></li>
+<li><p><strong>Compliance verdict</strong> — <span
+class="math inline">\(\mathbf{Permit}\)</span>, <span
+class="math inline">\(\mathbf{Conditional}\)</span>, or <span
+class="math inline">\(\mathbf{Block}\)</span> from the lattice</p></li>
+<li><p><strong>Outcome</strong> — success, failure, or blocked</p></li>
+<li><p><strong>Chain hash</strong> <span
+class="math inline">\(h_t\)</span></p></li>
+</ul>
+<p>The hash chain is defined recursively: <span
+class="math display">\[\begin{equation}
+  h_t = \text{SHA-256}\!\left(h_{t-1} \,\big\|\,
+\text{JSON}_{\text{canon}}(e_t)\right),
+  \quad h_0 = 0^{64}
+\end{equation}\]</span> where <span
+class="math inline">\(\text{JSON}_{\text{canon}}\)</span> is
+deterministic (sorted keys, ASCII-safe). Any modification to entry <span
+class="math inline">\(e_k\)</span> produces <span
+class="math inline">\(h_k&#39; \neq h_k\)</span>, which propagates:
+<span class="math inline">\(h_{k+1}&#39; \neq h_{k+1}, \ldots, h_n&#39;
+\neq h_n\)</span> — making tampering detectable in <span
+class="math inline">\(O(n)\)</span> time via chain verification.</p>
+<div id="thm:tamper" class="theorem">
+<p><strong>Theorem 4</strong> (Tamper Evidence). <em>Let <span
+class="math inline">\(\mathcal{L} = (e_1, \ldots, e_n, h_1, \ldots,
+h_n)\)</span> be an audit log. For any adversary that modifies a single
+entry <span class="math inline">\(e_k\)</span> to <span
+class="math inline">\(e_k&#39;\)</span> without recomputing subsequent
+hashes, the verifier detects the modification at position <span
+class="math inline">\(k\)</span> with probability 1 (deterministic). An
+adversary that also recomputes <span class="math inline">\(h_k, \ldots,
+h_n\)</span> must break SHA-256 preimage resistance to produce a valid
+chain matching <span class="math inline">\(h_n\)</span>.</em></p>
+</div>
+<div class="proof">
+<p><em>Proof.</em> The first claim follows directly from the hash chain
+definition: <span class="math inline">\(h_k\)</span> is a function of
+<span class="math inline">\(e_k\)</span> and <span
+class="math inline">\(h_{k-1}\)</span>, so <span
+class="math inline">\(e_k&#39; \neq e_k \Rightarrow h_k&#39; \neq
+h_k\)</span> with overwhelming probability under SHA-256 collision
+resistance. The second claim reduces to the preimage resistance of
+SHA-256, which holds under standard cryptographic assumptions <span
+class="citation" data-cites="fips2015sha">(National Institute of
+Standards and Technology 2015)</span>. ◻</p>
+</div>
+<h4 id="provider-agreement-compliance.">Provider Agreement
+Compliance.</h4>
+<p>The speculative racing architecture simultaneously queries models
+from multiple providers (OpenAI, Anthropic, Google, OpenRouter). Each
+provider’s terms of service imposes independent audit obligations:</p>
+<div id="tab:provider-audit">
+<table>
+<caption>Provider audit requirements satisfied by the hash-chain
+log</caption>
+<thead>
+<tr>
+<th style="text-align: left;">Provider</th>
+<th style="text-align: left;">Requirement</th>
+<th style="text-align: right;">Weight <span
+class="math inline">\(\lambda\)</span></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">OpenAI</td>
+<td style="text-align: left;">§7.2 Action Logging for autonomous
+agents</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td style="text-align: left;">Anthropic</td>
+<td style="text-align: left;">§6.1 Operator responsibility for agentic
+pipelines</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td style="text-align: left;">Google</td>
+<td style="text-align: left;">§7.2 Human review audit trail</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td style="text-align: left;">OpenRouter</td>
+<td style="text-align: left;">§2.1 Pass-through compliance with upstream
+providers</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td style="text-align: left;">SOC II</td>
+<td style="text-align: left;">CC6.1 Tamper-evident access logs</td>
+<td style="text-align: right;">1</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The compliance Lagrangian applied to the audit obligation itself is:
+<span class="math display">\[\begin{equation}
+  \mathcal{L}_{\text{audit}}(a) = \max\!\left(\lambda_{\text{OpenAI}}
+\cdot \mathbf{1}[\text{unlogged}],\;
+    \lambda_{\text{Anth}} \cdot \mathbf{1}[\text{unlogged}], \ldots
+\right)
+\end{equation}\]</span> Any unlogged action produces <span
+class="math inline">\(\mathcal{L}_{\text{audit}} \geq 1 &gt; 0\)</span>
+— a <span class="math inline">\(\mathbf{Block}\)</span> under all
+provider policies simultaneously. The system is therefore
+<em>self-referentially compliant</em>: the agent that enforces
+regulatory compliance is itself subject to the same lattice.</p>
 <h1 id="sec:braille">The Braille Lattice Isomorphism</h1>
 <p>We observe a deep structural correspondence between the compliance
 lattice and the classical Braille encoding that illuminates both
@@ -553,7 +663,7 @@ class="math inline">\(\phi(b \wedge b&#39;) = \phi(b)
 <h2 id="isomorphism-with-the-compliance-lattice">Isomorphism with the
 Compliance Lattice</h2>
 <div id="thm:braille" class="theorem">
-<p><strong>Theorem 4</strong> (Braille–Compliance Isomorphism). <em>Let
+<p><strong>Theorem 5</strong> (Braille–Compliance Isomorphism). <em>Let
 <span class="math inline">\(\mathcal{R} = \{r_1, \ldots, r_k\}\)</span>
 be a set of <span class="math inline">\(k \leq 6\)</span> regulatory
 constraints with verdicts in <span class="math inline">\(\{0,
@@ -623,7 +733,7 @@ CCPA, FCRA, GLBA), while the computer extension handles the data-format
 and information-security standards that post-date Braille’s original
 design.</p>
 <div class="corollary">
-<p><strong>Corollary 5</strong> (8-Dot Completeness). <em>The 8-dot
+<p><strong>Corollary 6</strong> (8-Dot Completeness). <em>The 8-dot
 Braille lattice <span class="math inline">\(\mathcal{B}_8\)</span> is
 sufficient to encode any compliance decision vector for the nine
 regulatory frameworks in our current implementation, with <span
@@ -679,7 +789,7 @@ estimates. Models with <span class="math inline">\(n_i = 0\)</span>
 receive index <span class="math inline">\(+\infty\)</span> (must be
 tried at least once).</p>
 <div class="theorem">
-<p><strong>Theorem 6</strong> (UCB1 Regret Bound). <em>Let <span
+<p><strong>Theorem 7</strong> (UCB1 Regret Bound). <em>Let <span
 class="math inline">\(\Delta_i = r^* - \bar{r}_i\)</span> be the gap
 between the optimal model reward <span
 class="math inline">\(r^*\)</span> and model <span
@@ -897,7 +1007,7 @@ href="https://www.anthropic.com/claude">https://www.anthropic.com/claude</a>.
 <div id="ref-auer2002finite" class="csl-entry" role="listitem">
 Auer, Peter, Nicolo Cesa-Bianchi, and Paul Fischer. 2002.
 <span>“Finite-Time Analysis of the Multiarmed Bandit Problem.”</span>
-<em>Machine Learning</em> 47 (2): 235–56.
+<em>Machine Learning</em> 47: 235–56.
 </div>
 <div id="ref-chase2022langchain" class="csl-entry" role="listitem">
 Chase, Harrison. 2022. <em><span>LangChain</span>: Building Applications
@@ -938,6 +1048,12 @@ Inference from Transformers via Speculative Decoding.”</span>
 role="listitem">
 Maclagan, Diane, and Bernd Sturmfels. 2015. <em>Introduction to Tropical
 Geometry</em>. Vol. 161. American Mathematical Society.
+</div>
+<div id="ref-fips2015sha" class="csl-entry" role="listitem">
+National Institute of Standards and Technology. 2015.
+<em><span>FIPS</span> 180-4: Secure Hash Standard
+(<span>SHS</span>)</em>. FIPS PUB 180-4. U.S. Department of Commerce. <a
+href="https://doi.org/10.6028/NIST.FIPS.180-4">https://doi.org/10.6028/NIST.FIPS.180-4</a>.
 </div>
 <div id="ref-openai2024gpt4" class="csl-entry" role="listitem">
 OpenAI. 2024. <em><span>GPT-4</span> Technical Report</em>. OpenAI. <a

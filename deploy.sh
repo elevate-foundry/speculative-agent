@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# deploy.sh — push to main, wait for GitHub Pages deploy to complete, then smoke-test the live URL.
+# deploy.sh -- push to main, stream live CI steps, then smoke-test the live site.
 set -euo pipefail
 
 REPO="elevate-foundry/speculative-agent"
 SITE="https://elevate-foundry.github.io/speculative-agent/"
-TIMEOUT=180   # seconds before we give up
-POLL=8        # seconds between status checks
+TIMEOUT=180
+POLL=8
 
-# ── 1. Push ──────────────────────────────────────────────────────────────────
-echo "▶ Pushing to main…"
+# -- 1. Push ------------------------------------------------------------------
+echo "> Pushing to main..."
 git push origin main
 
-# ── 2. Get the run ID for the commit we just pushed ──────────────────────────
+# -- 2. Find the run ID for this commit ---------------------------------------
 COMMIT=$(git rev-parse HEAD)
-echo "▶ Waiting for CI run for commit ${COMMIT:0:8}…"
+echo "> Waiting for CI run for commit ${COMMIT:0:8}..."
 
 RUN_ID=""
 for i in $(seq 1 10); do
@@ -30,49 +30,47 @@ for r in runs:
 done
 
 if [[ -z "$RUN_ID" ]]; then
-  echo "✗ Could not find CI run for this commit. Check: https://github.com/$REPO/actions"
+  echo "FAIL: Could not find CI run. Check: https://github.com/$REPO/actions"
   exit 1
 fi
 
-echo "▶ Run ID: $RUN_ID  →  https://github.com/$REPO/actions/runs/$RUN_ID"
-
-# ── 3. Stream live log output ─────────────────────────────────────────────────
-echo "▶ Streaming CI log…"
+echo "> Run $RUN_ID -> https://github.com/$REPO/actions/runs/$RUN_ID"
+echo "> Streaming steps..."
 echo ""
 
-LAST_STEP=""
+# -- 3. Stream live step status -----------------------------------------------
+LAST_COUNT=0
 ELAPSED=0
 while true; do
-  # Fetch job steps with their status
   STEPS=$(gh run view "$RUN_ID" --repo "$REPO" --json jobs 2>/dev/null \
     | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
+lines = []
 for job in data.get('jobs', []):
     for step in job.get('steps', []):
         status = step.get('status','')
         conclusion = step.get('conclusion') or ''
         name = step.get('name','')
         if status == 'in_progress':
-            icon = '\033[34m⟳\033[0m'
+            icon = '\033[34m~\033[0m'
         elif conclusion == 'success':
-            icon = '\033[32m✓\033[0m'
-        elif conclusion in ('failure','cancelled'):
-            icon = '\033[31m✗\033[0m'
+            icon = '\033[32mv\033[0m'
+        elif conclusion in ('failure','cancelled','timed_out'):
+            icon = '\033[31mx\033[0m'
         else:
             icon = ' '
-        print(f'{icon} {name}')
+        lines.append(f'  {icon}  {name}')
+print('\n'.join(lines))
 " 2>/dev/null || true)
 
-  # Reprint steps (move cursor up to overwrite)
   STEP_COUNT=$(echo "$STEPS" | wc -l)
-  if [[ -n "$LAST_STEP" ]]; then
-    printf "\033[%dA" "$STEP_COUNT"
+  if [[ $LAST_COUNT -gt 0 ]]; then
+    printf "\033[%dA" "$LAST_COUNT"
   fi
   echo "$STEPS"
-  LAST_STEP="$STEPS"
+  LAST_COUNT=$STEP_COUNT
 
-  # Check overall run status
   RESULT=$(gh run view "$RUN_ID" --repo "$REPO" --json status,conclusion \
     | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['status'],r.get('conclusion',''))")
   STATUS=$(echo "$RESULT" | awk '{print $1}')
@@ -81,12 +79,10 @@ for job in data.get('jobs', []):
   if [[ "$STATUS" == "completed" ]]; then
     echo ""
     if [[ "$CONCLUSION" == "success" ]]; then
-      echo "✓ CI passed (${ELAPSED}s)"
+      echo "CI passed in ${ELAPSED}s"
       break
     else
-      echo "✗ CI failed: $CONCLUSION"
-      echo ""
-      echo "── Failed step output ──────────────────────────────────"
+      echo "FAIL: CI $CONCLUSION"
       gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -50 || true
       exit 1
     fi
@@ -94,40 +90,27 @@ for job in data.get('jobs', []):
 
   sleep $POLL
   ELAPSED=$((ELAPSED + POLL))
-
-  if [[ $ELAPSED -ge $TIMEOUT ]]; then
-    echo "✗ Timed out after ${TIMEOUT}s"
-    exit 1
-  fi
+  [[ $ELAPSED -ge $TIMEOUT ]] && { echo "FAIL: timed out"; exit 1; }
 done
 
-# ── 4. Smoke-test the live site ───────────────────────────────────────────────
-echo "▶ Smoke-testing $SITE…"
-sleep 5  # brief CDN propagation window
+# -- 4. Smoke-test ------------------------------------------------------------
+echo "> Smoke-testing live site..."
+sleep 5
 
-HTTP=$(curl -sI "$SITE" | head -1 | awk '{print $2}')
-if [[ "$HTTP" == "200" ]]; then
-  echo "✓ Site live: $SITE (HTTP $HTTP)"
-else
-  echo "✗ Unexpected HTTP $HTTP — CDN may still be propagating"
-  exit 1
-fi
+check() {
+  local label="$1" url="$2"
+  local code
+  code=$(curl -sI "$url" | head -1 | awk '{print $2}')
+  if [[ "$code" == "200" ]]; then
+    echo "  OK  $url"
+  else
+    echo "  !!  $url  (HTTP $code)"
+  fi
+}
 
-# Check favicon
-FAV_HTTP=$(curl -sI "${SITE}favicon.svg" | head -1 | awk '{print $2}')
-if [[ "$FAV_HTTP" == "200" ]]; then
-  echo "✓ Favicon live: ${SITE}favicon.svg"
-else
-  echo "⚠ Favicon HTTP $FAV_HTTP"
-fi
-
-# Check eval page
-EVAL_HTTP=$(curl -sI "${SITE}eval/" | head -1 | awk '{print $2}')
-if [[ "$EVAL_HTTP" == "200" ]]; then
-  echo "✓ Eval page live: ${SITE}eval/"
-else
-  echo "⚠ Eval page HTTP $EVAL_HTTP"
-fi
+check "site"    "$SITE"
+check "favicon" "${SITE}favicon.svg"
+check "eval"    "${SITE}eval/"
 
 echo ""
-echo "🚀  $SITE"
+echo "Live: $SITE"

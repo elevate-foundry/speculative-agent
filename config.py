@@ -19,15 +19,9 @@ OLLAMA_BASE = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
-# Free OpenRouter models known to be reliable for agentic tasks.
-# These are :free tier models — no cost per token.
-_DEFAULT_OPENROUTER_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-r1:free",
-    "google/gemma-3-27b-it:free",
-    "qwen/qwen3-235b-a22b:free",
-    "mistralai/mistral-7b-instruct:free",
-]
+# Max number of OpenRouter free models to include in the race.
+# They are ranked by context window size (larger = better for agentic tasks).
+OPENROUTER_MAX_MODELS = int(os.environ.get("OPENROUTER_MAX_MODELS", "5"))
 
 # Models to include in the race. Override with AGENT_MODELS env var (comma-separated).
 # Defaults to a hand-picked set balancing speed, reasoning, and code ability.
@@ -59,7 +53,9 @@ class HardwareProfile:
 class ModelInfo:
     name: str
     size_gb: float
-    provider: str = "ollama"   # "ollama" or "openrouter"
+    provider: str = "ollama"       # "ollama" or "openrouter"
+    context_length: int = 0        # token context window (openrouter)
+    cost_per_token: float = 0.0    # prompt cost USD/token (0.0 = free)
     warmed: bool = False
     warm_latency_ms: Optional[float] = None
 
@@ -149,14 +145,18 @@ async def list_local_models() -> list[ModelInfo]:
 
 
 async def list_openrouter_models() -> list[ModelInfo]:
-    """Fetch all free models from OpenRouter and filter to our curated list."""
+    """
+    Auto-discover free OpenRouter models.
+    If OPENROUTER_MODELS env var is set, use that list (comma-separated).
+    Otherwise fetch all models from the API, keep only :free ones,
+    and rank by context_length descending (larger context = better for agents).
+    Caps at OPENROUTER_MAX_MODELS.
+    """
     if not OPENROUTER_API_KEY:
         return []
+
     env_override = os.environ.get("OPENROUTER_MODELS", "").strip()
-    wanted = (
-        [m.strip() for m in env_override.split(",") if m.strip()]
-        if env_override else _DEFAULT_OPENROUTER_MODELS
-    )
+
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
@@ -165,44 +165,54 @@ async def list_openrouter_models() -> list[ModelInfo]:
             )
             resp.raise_for_status()
             data = resp.json()
-            available = {m["id"] for m in data.get("data", [])}
-            models = []
-            for name in wanted:
-                if name in available:
-                    models.append(ModelInfo(name=name, size_gb=0.0, provider="openrouter"))
-            return models
+
+        all_models = data.get("data", [])
+
+        if env_override:
+            wanted = {m.strip() for m in env_override.split(",") if m.strip()}
+            candidates = [m for m in all_models if m["id"] in wanted]
+        else:
+            # Keep only genuinely free models (prompt cost == 0)
+            candidates = [
+                m for m in all_models
+                if ":free" in m["id"]
+                or float((m.get("pricing") or {}).get("prompt", "1") or "1") == 0.0
+            ]
+
+        # Rank by context_length descending — more context = more useful for agents
+        candidates.sort(key=lambda m: int(m.get("context_length") or 0), reverse=True)
+
+        # Cap to max
+        candidates = candidates[:OPENROUTER_MAX_MODELS]
+
+        models = []
+        for m in candidates:
+            pricing = m.get("pricing") or {}
+            cost = float(pricing.get("prompt", "0") or "0")
+            ctx = int(m.get("context_length") or 0)
+            models.append(ModelInfo(
+                name=m["id"],
+                size_gb=0.0,
+                provider="openrouter",
+                context_length=ctx,
+                cost_per_token=cost,
+            ))
+
+        return models
+
     except Exception as e:
         print(f"  [openrouter] Could not fetch models: {e}")
         return []
 
 
 async def warmup_openrouter_model(model: ModelInfo) -> ModelInfo:
-    """Ping OpenRouter with a 1-token request to confirm the model is live."""
-    import time
-    t0 = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            payload = {
-                "model": model.name,
-                "messages": [{"role": "user", "content": "ping"}],
-                "max_tokens": 1,
-                "stream": False,
-            }
-            resp = await client.post(
-                f"{OPENROUTER_BASE}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "HTTP-Referer": "https://github.com/elevate-foundry/speculative-agent",
-                    "X-Title": "speculative-agent",
-                },
-                json=payload,
-            )
-            resp.raise_for_status()
-        model.warmed = True
-        model.warm_latency_ms = (time.perf_counter() - t0) * 1000
-    except Exception as e:
-        model.warmed = False
-        print(f"  [warmup/openrouter] {model.name} FAILED: {e}")
+    """
+    OpenRouter warmup: no live ping (avoids 429 rate limits on free tier).
+    The model was already confirmed to exist in list_openrouter_models().
+    We mark it as warmed immediately with a nominal latency.
+    """
+    model.warmed = True
+    model.warm_latency_ms = 0.0
     return model
 
 
@@ -283,8 +293,13 @@ async def discover_and_warmup(verbose: bool = True) -> tuple[list[ModelInfo], Ha
 
     if verbose:
         for m in live:
-            tag = f"☁ openrouter" if m.provider == "openrouter" else f"{m.size_gb:.1f} GB  local"
-            print(f"  ✓ {m.name:<45} {tag} — warmed in {m.warm_latency_ms:.0f}ms")
+            if m.provider == "openrouter":
+                ctx_str = f"{m.context_length//1000}k ctx" if m.context_length else "?k ctx"
+                tag = f"☁ openrouter  {ctx_str}  free"
+            else:
+                tag = f"⬡ local       {m.size_gb:.1f} GB"
+            warmup = "(catalog)" if m.provider == "openrouter" else f"{m.warm_latency_ms:.0f}ms"
+            print(f"  ✓ {m.name:<50} {tag}  warmup={warmup}")
         for m in dead:
             print(f"  ✗ {m.name} — failed to warm")
 

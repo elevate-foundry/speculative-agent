@@ -264,8 +264,14 @@ class Agent:
         print("  ACTIVE MODELS")
         print("─" * 60)
         for m in self.models:
-            tag = "☁ openrouter" if m.provider == "openrouter" else f"⬡ local  {m.size_gb:.1f} GB"
-            print(f"  {m.name:<45} {tag}  warmup={m.warm_latency_ms:.0f}ms")
+            if m.provider == "openrouter":
+                ctx = f"{m.context_length//1000}k ctx" if m.context_length else "?k ctx"
+                tag = f"☁ openrouter  {ctx}  free"
+                warmup = "(catalog)"
+            else:
+                tag = f"⬡ local  {m.size_gb:.1f} GB"
+                warmup = f"{m.warm_latency_ms:.0f}ms"
+            print(f"  {m.name:<50} {tag}  warmup={warmup}")
         print(f"\n  Hardware limit: {self.hw.max_parallel_models} concurrent")
         print("═" * 60)
 

@@ -250,12 +250,45 @@ class Agent:
                 print(f"\n[agent] ✓ Task complete (declared by {action.model_source} at step {step})")
                 if action.description and action.description != "(no description)":
                     print(f"  {action.description}")
+                try:
+                    import hashlib as _hl
+                    from audit import log_action as _log_action
+                    import executor as _exe
+                    _log_action(
+                        action_type="noop", description=action.description,
+                        payload={}, model_source=action.model_source,
+                        autonomy=_exe.AUTONOMY, compliance_verdict="permit",
+                        outcome="success", outcome_detail="Task complete",
+                        step=step, task_hash=_hl.sha256(task.encode()).hexdigest(),
+                    )
+                except Exception:
+                    pass
                 break
 
             print(f"\n[agent] Step {step} — {action.action_type} from [{action.model_source}]: {action.description}")
 
             result = execute(action)
             last_result = result
+
+            # SOC 2 CC6.1 — append tamper-evident audit log entry
+            try:
+                import hashlib as _hl
+                from audit import log_action as _log_action
+                import executor as _exe
+                _log_action(
+                    action_type=action.action_type,
+                    description=action.description,
+                    payload=action.payload,
+                    model_source=action.model_source,
+                    autonomy=_exe.AUTONOMY,
+                    compliance_verdict="permit",
+                    outcome="success" if result.success else "failure",
+                    outcome_detail=(result.output or result.error or "")[:300],
+                    step=step,
+                    task_hash=_hl.sha256(task.encode()).hexdigest(),
+                )
+            except Exception:
+                pass
 
             # User typed freeform feedback instead of y/n — inject and re-race
             if result.user_feedback:
@@ -407,7 +440,7 @@ async def interactive_repl(agent: Agent):
     print(f"  Autonomy : {autonomy_icon.get(autonomy, autonomy)}")
     print(f"  Budget   : {budget_icon.get(budget, budget)}")
     print(f"  Models   : {len(agent.models)} active  ({', '.join(m.provider for m in agent.models[:3])}{'...' if len(agent.models) > 3 else ''})")
-    print("  Commands : /models /history /thoughts /stats /bench /quit")
+    print("  Commands : /models /history /thoughts /stats /bench /audit /verify /quit")
     print("═" * 60 + "\n")
 
     while True:
@@ -436,6 +469,14 @@ async def interactive_repl(agent: Agent):
             suite  = parts[2] if len(parts) > 2 else "mixed"
             from benchmark import run_benchmark
             await run_benchmark(suite_name=suite, rounds=rounds, verbose=False)
+        elif task == "/audit":
+            from audit import print_log_table
+            print_log_table()
+        elif task == "/verify":
+            from audit import verify_chain
+            ok, n, msg = verify_chain()
+            icon = "✓" if ok else "✗"
+            print(f"[audit] {icon} {msg}")
         else:
             await agent.run_task(task)
 

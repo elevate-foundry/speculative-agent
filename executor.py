@@ -184,9 +184,11 @@ def execute(action: Action, auto_approve: bool = False) -> ActionResult:
     # ── Compliance lattice ────────────────────────────────────────────────
     # Always run for destructive actions. Non-destructive actions get a
     # lightweight audit log entry but are never blocked by compliance alone.
-    if action.action_type not in ("read_file", "noop"):
+    if action.action_type not in ("noop", "read_file"):
         from compliance import evaluate, infer_context, print_decision
+        # Extract the most specific path or content for context inference
         path = (action.payload.get("path") or
+                action.payload.get("file_path") or
                 action.payload.get("command") or
                 action.payload.get("code") or
                 action.payload.get("script") or
@@ -201,7 +203,7 @@ def execute(action: Action, auto_approve: bool = False) -> ActionResult:
                 error=f"Compliance BLOCK — {decision.justification}",
             )
 
-        if decision.mitigations_required and _is_destructive(action):
+        if decision.mitigations_required and (_is_destructive(action) or ctx.contains_phi or ctx.contains_pii):
             print_decision(decision)
 
     # ── Autonomy gate ─────────────────────────────────────────────────────

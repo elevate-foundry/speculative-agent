@@ -70,8 +70,8 @@ class ConstraintResult:
 
 
 def _check_soc(ctx: DataContext, action_type: str) -> ConstraintResult:
-    """SOC I/II/III: all destructive actions must be logged; audit logs are immutable."""
-    if ctx.is_audit_log:
+    """SOC I/II/III: audit logs are immutable — writes/deletes blocked; reads permitted."""
+    if ctx.is_audit_log and action_type not in ("read_file", "noop"):
         return ConstraintResult(
             "SOC-II", Verdict.BLOCK,
             "Audit logs are immutable under SOC II CC6.1/CC7.2. Deletion of audit trail is prohibited.",
@@ -331,32 +331,76 @@ def _last_audit_hash() -> str:
 
 def infer_context(path: str, description: str = "") -> DataContext:
     """
-    Heuristically infer DataContext from a file path and action description.
-    The agent calls this before any destructive action.
+    Heuristically infer DataContext from a file path, bash command, or description.
+
+    This is the agent's "sensorium" — it translates raw action strings into
+    a structured DataContext the compliance lattice can evaluate. It understands:
+      - File paths (direct and embedded in bash commands)
+      - Bash commands that access sensitive data patterns
+      - Jurisdiction signals from path prefixes, country codes, and regulation keywords
+
+    A `read_file` on /var/log/system.log → DataContext(data_type="log", contains_pii=False)
+    A `read_file` on /data/patients/records.json → DataContext(data_type="health", contains_phi=True)
+    A `bash: cat /users/db/ssn_table.csv` → DataContext(data_type="pii", contains_pii=True)
     """
-    path_lower = path.lower()
-    desc_lower = description.lower()
-    combined = path_lower + " " + desc_lower
+    import re as _re
+
+    # Extract file paths from bash commands (cat, cp, mv, rm, grep, awk, etc.)
+    path_tokens = _re.findall(r"(?:^|\s)([/~][^\s;|&>]+)", path)
+    all_paths = [path] + path_tokens
+
+    combined = " ".join(all_paths).lower() + " " + description.lower()
+
+    # ── Data type classification ──────────────────────────────────────────────
+    _HEALTH_KW  = ("hipaa", "health", "patient", "medical", "phi", "ehr", "emr",
+                   "diagnosis", "prescription", "clinical", "radiology", "lab_result",
+                   "medication", "symptom", "icd", "cpt")
+    _FIN_KW     = ("finance", "bank", "credit", "payment", "fcra", "glba", "metro",
+                   "tradeline", "transaction", "account", "ledger", "invoice", "billing",
+                   "payroll", "salary", "tax", "w2", "1099", "routing", "swift")
+    _CRED_KW    = ("password", "passwd", "secret", "api_key", "token", "credential",
+                   "ssh", "private_key", ".pem", ".p12", ".pfx", "keystore", "vault",
+                   "auth", "bearer", "oauth", "jwt")
+    _LOG_KW     = ("audit", "soc", "event_log", "access_log", "syslog", "auth.log",
+                   "/var/log", "application.log", "error.log", "audit.jsonl")
+    _PII_KW     = ("pii", "customer", "email", "ssn", "social_security", "dob",
+                   "date_of_birth", "address", "personal", "passport", "driver_license",
+                   "phone", "zipcode", "users/", "user_data", "profile", "identity")
+
+    data_type = (
+        "health"     if any(k in combined for k in _HEALTH_KW) else
+        "financial"  if any(k in combined for k in _FIN_KW) else
+        "credential" if any(k in combined for k in _CRED_KW) else
+        "log"        if any(k in combined for k in _LOG_KW) else
+        "pii"        if any(k in combined for k in _PII_KW) else
+        "code"
+    )
+
+    # ── Jurisdiction detection ────────────────────────────────────────────────
+    _EU_KW   = ("gdpr", "/eu/", "/europe/", ".de/", ".fr/", ".nl/", ".ie/", ".es/",
+                "european", "dsgvo", "rgpd")
+    _CA_KW   = ("ccpa", "/california/", "/ca/", "california")
+    _BR_KW   = ("lgpd", "/brazil/", "/br/", "brasil", "brazil")
+    _CN_KW   = ("pipl", "/china/", "/cn/", "chinese", "prc")
+    _CAD_KW  = ("pipeda", "/canada/", "/ca/", "canadian", "quebec", "law25")
+
+    jurisdiction = (
+        "EU" if any(k in combined for k in _EU_KW) else
+        "BR" if any(k in combined for k in _BR_KW) else
+        "CN" if any(k in combined for k in _CN_KW) else
+        "CAD" if any(k in combined for k in _CAD_KW) else
+        "CA" if any(k in combined for k in _CA_KW) else
+        "US"
+    )
 
     return DataContext(
         path=path,
-        data_type=(
-            "health"     if any(k in combined for k in ("hipaa", "health", "patient", "medical", "phi")) else
-            "financial"  if any(k in combined for k in ("finance", "bank", "credit", "payment", "fcra", "glba", "metro", "tradeline")) else
-            "credential" if any(k in combined for k in ("password", "secret", "key", "token", "credential", "ssh")) else
-            "log"        if any(k in combined for k in ("log", "audit", "soc", "event")) else
-            "pii"        if any(k in combined for k in ("pii", "user", "customer", "email", "name", "address", "ssn")) else
-            "code"
-        ),
-        subject_jurisdiction=(
-            "EU" if any(k in combined for k in ("gdpr", "eu", "europe", ".de", ".fr", ".nl")) else
-            "CA" if any(k in combined for k in ("ccpa", "california", ".ca")) else
-            "US"
-        ),
-        contains_pii=any(k in combined for k in ("pii", "user", "customer", "email", "ssn", "name", "address", "personal")),
-        contains_phi=any(k in combined for k in ("health", "patient", "medical", "phi", "diagnosis", "prescription")),
-        contains_financial=any(k in combined for k in ("finance", "bank", "credit", "payment", "transaction", "account", "tradeline")),
-        is_audit_log=any(k in combined for k in ("audit", "soc", ".log", "event_log", "access_log")),
+        data_type=data_type,
+        subject_jurisdiction=jurisdiction,
+        contains_pii=any(k in combined for k in (*_PII_KW, *_HEALTH_KW)),
+        contains_phi=any(k in combined for k in _HEALTH_KW),
+        contains_financial=any(k in combined for k in _FIN_KW),
+        is_audit_log=any(k in combined for k in _LOG_KW),
     )
 
 

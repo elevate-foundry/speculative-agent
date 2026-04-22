@@ -220,6 +220,80 @@ async def _stream_openrouter(
                     return
 
 
+async def _stream_direct(
+    model_name: str,
+    prompt: str,
+    system_prompt: str,
+    stream_obj: ModelStream,
+    cancel_event: asyncio.Event,
+    color: str,
+    live_output: bool,
+    provider_config: object,
+    screenshot_b64: Optional[str] = None,
+) -> None:
+    """Stream from a direct provider API (OpenAI-compatible chat/completions)."""
+    import httpx
+    import json as _json
+
+    prov = provider_config  # type: ignore
+
+    if screenshot_b64:
+        user_content = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {
+                "url": f"data:image/png;base64,{screenshot_b64}"
+            }},
+        ]
+    else:
+        user_content = prompt
+
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_content},
+        ],
+        "stream": True,
+        "max_tokens": 512,
+        "temperature": 0.3,
+    }
+
+    auth_value = f"{prov.auth_prefix} {prov.api_key}".strip() if prov.auth_prefix else prov.api_key
+    headers = {prov.auth_header: auth_value, **prov.extra_headers}
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        async with client.stream(
+            "POST", f"{prov.base_url}/chat/completions",
+            json=payload, headers=headers
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if cancel_event.is_set():
+                    stream_obj.cancelled = True
+                    return
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:].strip()
+                if data == "[DONE]":
+                    stream_obj.done = True
+                    return
+                try:
+                    chunk = _json.loads(data)
+                except _json.JSONDecodeError:
+                    continue
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                token = delta.get("content", "")
+                if token:
+                    stream_obj.tokens.append(token)
+                    if live_output:
+                        sys.stdout.write(f"{color}{token}{_RESET}")
+                        sys.stdout.flush()
+                finish = chunk.get("choices", [{}])[0].get("finish_reason")
+                if finish and finish != "null" and finish is not None:
+                    stream_obj.done = True
+                    return
+
+
 async def stream_model(
     model_name: str,
     prompt: str,
@@ -229,6 +303,7 @@ async def stream_model(
     system_prompt: str = "",
     live_output: bool = True,
     screenshot_b64: Optional[str] = None,
+    provider_config: object = None,
 ) -> None:
     label = _model_label(model_name, stream_obj.provider)
     color = _MODEL_COLORS.get(model_name, "")
@@ -237,7 +312,11 @@ async def stream_model(
     if live_output:
         print(f"\n{label} starting...")
     try:
-        if stream_obj.provider == "openrouter":
+        if provider_config is not None:
+            await _stream_direct(model_name, prompt, system_prompt,
+                                 stream_obj, cancel_event, color, live_output,
+                                 provider_config, screenshot_b64=screenshot_b64)
+        elif stream_obj.provider == "openrouter":
             await _stream_openrouter(model_name, prompt, system_prompt,
                                      stream_obj, cancel_event, color, live_output,
                                      screenshot_b64=screenshot_b64)
@@ -287,7 +366,8 @@ async def supervise_race(
     tasks = {
         m.name: asyncio.create_task(
             stream_model(m.name, prompt, streams[m.name], cancel_event, ollama_base, system_prompt,
-                         live_output=live_output, screenshot_b64=screenshot_b64)
+                         live_output=live_output, screenshot_b64=screenshot_b64,
+                         provider_config=getattr(m, "provider_config", None))
         )
         for m in models_info
     }

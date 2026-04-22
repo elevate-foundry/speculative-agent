@@ -27,6 +27,7 @@ from config import (
     classify_task_tier, list_openrouter_models, BUDGET_TIER, OPENROUTER_API_KEY,
     is_private_task,
 )
+from providers import register_key, active_providers, PROVIDER_REGISTRY
 from supervisor import supervise_race, print_race_summary
 from executor import execute, Action, ActionResult
 
@@ -321,12 +322,19 @@ class Agent:
         for m in self.models:
             if m.provider == "openrouter":
                 ctx = f"{m.context_length//1000}k ctx" if m.context_length else "?k ctx"
-                tag = f"☁ openrouter  {ctx}  free"
+                tag = f"☁ openrouter    {ctx}  free"
                 warmup = "(catalog)"
-            else:
-                tag = f"⬡ local  {m.size_gb:.1f} GB"
+            elif m.provider == "ollama":
+                tag = f"⬡ local         {m.size_gb:.1f} GB"
                 warmup = f"{m.warm_latency_ms:.0f}ms"
-            print(f"  {m.name:<50} {tag}  warmup={warmup}")
+            else:
+                tag = f"⚡ {m.provider:<12} direct"
+                warmup = "(direct)"
+            print(f"  {m.name:<50} {tag}  {warmup}")
+        unused = [p.name for p in PROVIDER_REGISTRY if not p.api_key]
+        if unused:
+            print(f"\n  Inactive (no key): {', '.join(unused)}")
+            print(f"  Set e.g. OPENAI_API_KEY=sk-... to add direct provider to the race")
         print(f"\n  Hardware limit: {self.hw.max_parallel_models} concurrent")
         print("═" * 60)
 

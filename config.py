@@ -140,11 +140,12 @@ class HardwareProfile:
 class ModelInfo:
     name: str
     size_gb: float
-    provider: str = "ollama"       # "ollama" or "openrouter"
+    provider: str = "ollama"       # "ollama", "openrouter", or provider name
     context_length: int = 0        # token context window (openrouter)
     cost_per_token: float = 0.0    # prompt cost USD/token (0.0 = free)
     warmed: bool = False
     warm_latency_ms: Optional[float] = None
+    provider_config: object = None  # ProviderConfig if direct provider
 
 
 def detect_hardware() -> HardwareProfile:
@@ -369,6 +370,26 @@ async def discover_and_warmup(verbose: bool = True) -> tuple[list[ModelInfo], Ha
     if not local_models and not OPENROUTER_API_KEY:
         raise RuntimeError("No Ollama models found and no OPENROUTER_API_KEY set.")
 
+    # --- Direct provider models (OpenAI, Anthropic, Google, xAI, Mistral) ---
+    from providers import models_for_tier, active_providers
+    direct_models = []
+    active = active_providers()
+    if active:
+        if verbose:
+            names = [p.name for p in active]
+            print(f"[config] Direct provider keys detected: {names}")
+        for prov, model_id in models_for_tier(BUDGET_TIER):
+            direct_models.append(ModelInfo(
+                name=model_id,
+                size_gb=0.0,
+                provider=prov.name,
+                warmed=True,
+                warm_latency_ms=0.0,
+                provider_config=prov,
+            ))
+        if verbose and direct_models:
+            print(f"[config] Direct models added: {[m.name for m in direct_models]}")
+
     # --- OpenRouter cloud models ---
     or_models = []
     if OPENROUTER_API_KEY:
@@ -384,7 +405,7 @@ async def discover_and_warmup(verbose: bool = True) -> tuple[list[ModelInfo], Ha
         if verbose:
             print("[config] No OPENROUTER_API_KEY — skipping cloud models (set it to add free cloud racing)")
 
-    all_models = local_models + or_models
+    all_models = local_models + direct_models + or_models
     if not all_models:
         raise RuntimeError("No models available. Pull an Ollama model or set OPENROUTER_API_KEY.")
 

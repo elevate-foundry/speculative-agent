@@ -38,6 +38,7 @@ jobs:
             --metadata "lang=en" \
             --variable "header-includes=<link rel='canonical' href='https://elevate-foundry.github.io/speculative-agent/'>" \
             -o main.html
+          sed -i 's|<script src="https://polyfill.io[^"]*"></script>||g' main.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

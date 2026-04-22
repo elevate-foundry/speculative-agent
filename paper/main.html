@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <meta name="author" content="Ryan Barrett Elevate Foundry ryan@elevatefoundry.com" />
+  <meta name="dcterms.date" content="2026-04-21" />
+  <title>Speculative Agent</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    div.abstract {
+      margin: 2em 2em 2em 2em;
+      text-align: left;
+      font-size: 85%;
+    }
+    div.abstract-title {
+      font-weight: bold;
+      text-align: center;
+      padding: 0;
+      margin-bottom: 0.5em;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    /* CSS for citations */
+    div.csl-bib-body { }
+    div.csl-entry {
+      clear: both;
+    }
+    .hanging-indent div.csl-entry {
+      margin-left:2em;
+      text-indent:-2em;
+    }
+    div.csl-left-margin {
+      min-width:2em;
+      float:left;
+    }
+    div.csl-right-inline {
+      margin-left:2em;
+      padding-left:1em;
+    }
+    div.csl-indent {
+      margin-left: 2em;
+    }  </style>
+  <script
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"
+  type="text/javascript"></script>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Speculative Agent</h1>
+<p class="author">Ryan Barrett<br />
+<em>Elevate Foundry</em><br />
+<a href="mailto:ryan@elevatefoundry.com">ryan@elevatefoundry.com</a></p>
+<p class="date">2026-04-21</p>
+<div class="abstract">
+<div class="abstract-title">Abstract</div>
+<p>We present <em>Speculative Agent</em>, a novel autonomous agent
+architecture that races multiple large language models (LLMs) from
+competing providers simultaneously, short-circuiting the race when the
+first model reaches sufficient confidence. Unlike prior work in
+speculative decoding <span class="citation"
+data-cites="leviathan2023fast">(Leviathan et al. 2023)</span>, which
+uses a single draft-verifier pair, our system operates across
+heterogeneous providers (OpenAI, Anthropic, Google, xAI, Mistral, and
+open-weight models via Ollama), enabling cross-vendor ensemble inference
+without the latency penalty of sequential voting. We formalize the
+short-circuit condition as a sequential hypothesis test and prove that
+the expected quality of the winning model approaches the ensemble
+maximum under mild assumptions on model calibration.</p>
+<p>Second, we introduce a <em>tropical compliance lattice</em>: a
+regulatory constraint system modeled as a linear program over the
+tropical semiring <span class="math inline">\((\mathbb{R}\cup
+\{-\infty\},
+\max, +)\)</span> that must be satisfied before any irreversible action
+executes. The system computes a Lagrangian <span
+class="math inline">\(\mathcal{L}(a) = \sum_i \lambda_i \cdot
+c_i(a)\)</span> across nine regulatory frameworks (SOC I/II/III, GDPR,
+CCPA, HIPAA, GLBA, FCRA, Metro II, CDIA, ISO 27001). An action is
+permitted if and only if <span class="math inline">\(\mathcal{L}(a) =
+0\)</span>. We show this is equivalent to finding a feasible point in a
+constraint polytope, and that the tropical structure allows efficient
+computation via max-plus algebra.</p>
+<p>The combined system achieves autonomous multi-step desktop control
+with formally justified regulatory compliance, privacy-aware model
+routing, and session-scoped cost optimization via a budget tier
+mechanism modeled as a multi-armed bandit.</p>
+</div>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#introduction" id="toc-introduction">Introduction</a></li>
+<li><a href="#background" id="toc-background">Background</a>
+<ul>
+<li><a href="#speculative-decoding"
+id="toc-speculative-decoding">Speculative Decoding</a></li>
+<li><a href="#tropical-semirings" id="toc-tropical-semirings">Tropical
+Semirings</a></li>
+<li><a href="#regulatory-frameworks"
+id="toc-regulatory-frameworks">Regulatory Frameworks</a></li>
+</ul></li>
+<li><a href="#sec:racing" id="toc-sec:racing">Parallel Speculative
+Racing</a>
+<ul>
+<li><a href="#architecture" id="toc-architecture">Architecture</a></li>
+<li><a href="#short-circuit-condition"
+id="toc-short-circuit-condition">Short-Circuit Condition</a></li>
+<li><a href="#expected-quality-analysis"
+id="toc-expected-quality-analysis">Expected Quality Analysis</a></li>
+<li><a href="#sequential-hypothesis-test-interpretation"
+id="toc-sequential-hypothesis-test-interpretation">Sequential Hypothesis
+Test Interpretation</a></li>
+<li><a href="#provider-routing-as-multi-armed-bandit"
+id="toc-provider-routing-as-multi-armed-bandit">Provider Routing as
+Multi-Armed Bandit</a></li>
+</ul></li>
+<li><a href="#sec:compliance" id="toc-sec:compliance">Tropical
+Compliance Lattice</a>
+<ul>
+<li><a href="#regulatory-constraint-model"
+id="toc-regulatory-constraint-model">Regulatory Constraint
+Model</a></li>
+<li><a href="#lagrangian-formulation"
+id="toc-lagrangian-formulation">Lagrangian Formulation</a></li>
+<li><a href="#tropical-semiring-structure"
+id="toc-tropical-semiring-structure">Tropical Semiring
+Structure</a></li>
+<li><a href="#constraint-hierarchy"
+id="toc-constraint-hierarchy">Constraint Hierarchy</a></li>
+<li><a href="#audit-log-integrity" id="toc-audit-log-integrity">Audit
+Log Integrity</a></li>
+</ul></li>
+<li><a href="#sec:privacy" id="toc-sec:privacy">Privacy-Aware Model
+Routing</a></li>
+<li><a href="#sec:impl" id="toc-sec:impl">Implementation</a></li>
+<li><a href="#sec:eval" id="toc-sec:eval">Evaluation</a>
+<ul>
+<li><a href="#racing-efficiency" id="toc-racing-efficiency">Racing
+Efficiency</a></li>
+<li><a href="#compliance-accuracy"
+id="toc-compliance-accuracy">Compliance Accuracy</a></li>
+<li><a href="#loop-convergence" id="toc-loop-convergence">Loop
+Convergence</a></li>
+</ul></li>
+<li><a href="#sec:related" id="toc-sec:related">Related Work</a></li>
+<li><a href="#conclusion" id="toc-conclusion">Conclusion</a></li>
+</ul>
+</nav>
+<h1 id="introduction">Introduction</h1>
+<p>Autonomous agents that control desktop environments, execute code,
+and interact with web browsers represent a rapidly maturing capability
+in applied AI. However, two fundamental problems remain largely
+unaddressed in the literature:</p>
+<ol>
+<li><p><strong>Provider lock-in and capability fragmentation.</strong>
+State-of-the-art capabilities are distributed across competing vendors.
+No single model dominates across all task types <span class="citation"
+data-cites="openai2024gpt4 anthropic2024claude google2024gemini">(OpenAI
+2024; Anthropic 2024; Google DeepMind 2024)</span>. Existing agent
+frameworks commit to a single model, forfeiting the complementary
+strengths of competing systems.</p></li>
+<li><p><strong>Regulatory compliance at the action level.</strong> As
+agents gain the ability to delete files, modify databases, and submit
+forms, the question of <em>which actions are legally permissible</em>
+becomes critical. No prior agent system incorporates structured
+regulatory reasoning as a precondition for action execution.</p></li>
+</ol>
+<p>We address both problems. Our contributions are:</p>
+<ul>
+<li><p>A <strong>parallel speculative racing architecture</strong> that
+runs <span class="math inline">\(n\)</span> models from heterogeneous
+providers simultaneously and commits to the first model that reaches a
+confidence threshold <span class="math inline">\(\tau\)</span>, with
+formal analysis of expected quality and latency.</p></li>
+<li><p>A <strong>tropical compliance lattice</strong> with Lagrangian
+action justification spanning nine regulatory frameworks, backed by an
+append-only chained audit log satisfying SOC II tamper-evidence
+requirements.</p></li>
+<li><p>A <strong>privacy-aware routing policy</strong> that
+automatically detects sensitive task content and confines execution to
+local models, preventing exfiltration of protected data to cloud
+providers.</p></li>
+<li><p>An <strong>open implementation</strong> at <a
+href="https://github.com/elevate-foundry/speculative-agent"
+class="uri">https://github.com/elevate-foundry/speculative-agent</a>.</p></li>
+</ul>
+<h1 id="background">Background</h1>
+<h2 id="speculative-decoding">Speculative Decoding</h2>
+<p>Speculative decoding <span class="citation"
+data-cites="leviathan2023fast chen2023accelerating">(Leviathan et al.
+2023; Chen et al. 2023)</span> accelerates inference by using a small
+draft model to propose tokens that a larger target model verifies via
+rejection sampling. The acceptance probability for a draft token <span
+class="math inline">\(x\)</span> is: <span
+class="math display">\[\begin{equation}
+  P(\text{accept}) = \min\!\left(1,\;
+\frac{p_{\text{target}}(x)}{p_{\text{draft}}(x)}\right)
+  \label{eq:spec_decode}
+\end{equation}\]</span> This preserves the target distribution while
+achieving significant speedups when the draft model is well-calibrated
+to the target. Our work adapts this idea to the multi-provider setting:
+rather than a draft-verifier pair, we race <span
+class="math inline">\(n\)</span> independent models and accept the first
+whose output exceeds a quality threshold.</p>
+<h2 id="tropical-semirings">Tropical Semirings</h2>
+<p>A <em>tropical semiring</em> <span
+class="math inline">\((\mathbb{R}_{\max}, \oplus, \otimes)\)</span> is
+the set <span class="math inline">\(\mathbb{R}\cup \{-\infty\}\)</span>
+equipped with operations: <span class="math display">\[\begin{align}
+  a \oplus b &amp;= \max(a, b) \\
+  a \otimes b &amp;= a + b
+\end{align}\]</span> with identities <span
+class="math inline">\(\mathbf{0} = -\infty\)</span> and <span
+class="math inline">\(\mathbf{1} = 0\)</span> <span class="citation"
+data-cites="maclagan2015introduction">(Maclagan and Sturmfels
+2015)</span>. Tropical linear algebra enables efficient shortest-path
+and constraint-satisfaction computations that would require exponential
+time in classical Boolean logic.</p>
+<h2 id="regulatory-frameworks">Regulatory Frameworks</h2>
+<p>The regulatory landscape for data-handling autonomous agents spans
+several overlapping frameworks with distinct retention and deletion
+rules. GDPR Article 17 establishes the right to erasure subject to
+Article 5(1)(e) storage limitation principles. HIPAA §164.530(j)
+mandates six-year retention for protected health information. FCRA §605
+requires seven-year retention for adverse consumer report items. GLBA
+Safeguards Rule §314.4(f) requires secure disposal procedures for
+customer financial records. The intersection of these constraints
+creates a non-trivial feasibility problem that we formalize in
+Section <a href="#sec:compliance" data-reference-type="ref"
+data-reference="sec:compliance">4</a>.</p>
+<h1 id="sec:racing">Parallel Speculative Racing</h1>
+<h2 id="architecture">Architecture</h2>
+<p>Let <span class="math inline">\(\mathcal{M} = \{m_1, \ldots,
+m_n\}\)</span> be a set of models drawn from potentially distinct
+providers. Given a task prompt <span
+class="math inline">\(\mathbf{p}\)</span>, the racing supervisor
+launches <span class="math inline">\(n\)</span> concurrent streaming
+inference requests and monitors token streams in real time.</p>
+<div class="definition">
+<p><strong>Definition 1</strong> (Confidence Score). <em>For model <span
+class="math inline">\(m_i\)</span> at time <span
+class="math inline">\(t\)</span>, the confidence score <span
+class="math inline">\(\sigma_i(t) \in [0,1]\)</span> is computed from
+the partial token stream <span
+class="math inline">\(\mathbf{x}_{i,1:t}\)</span> as a weighted
+combination of:</em></p>
+<ol>
+<li><p><em>Presence and syntactic validity of a structured action
+block</em></p></li>
+<li><p><em>Explicit confidence declaration in the model’s
+reasoning</em></p></li>
+<li><p><em>Reasoning-to-action token ratio (longer reasoning at equal
+length <span class="math inline">\(\Rightarrow\)</span> higher
+confidence)</em></p></li>
+</ol>
+</div>
+<h2 id="short-circuit-condition">Short-Circuit Condition</h2>
+<div class="definition">
+<p><strong>Definition 2</strong> (Short-Circuit). <em>The race
+short-circuits in favor of model <span
+class="math inline">\(m_i\)</span> at time <span
+class="math inline">\(t^*\)</span> if: <span
+class="math display">\[\begin{equation}
+  t^* = \inf\left\{t : \sigma_i(t) \geq \tau \text{ and }
+|\mathbf{x}_{i,1:t}| \geq T_{\min}\right\}
+  \label{eq:shortcircuit}
+\end{equation}\]</span> where <span class="math inline">\(\tau =
+0.85\)</span> is the confidence threshold and <span
+class="math inline">\(T_{\min} = 40\)</span> is the minimum token count
+before short-circuit eligibility.</em></p>
+</div>
+<p>The short-circuit immediately cancels all other model streams via
+cooperative cancellation signals, reducing total inference cost.</p>
+<h2 id="expected-quality-analysis">Expected Quality Analysis</h2>
+<div id="thm:quality" class="theorem">
+<p><strong>Theorem 1</strong> (Quality Lower Bound). <em>Let models
+<span class="math inline">\(m_1, \ldots, m_n\)</span> have independent
+quality distributions <span class="math inline">\(Q_i \sim F_i\)</span>
+with <span class="math inline">\(\mathbb{E}[Q_i] = \mu_i\)</span>. The
+expected quality of the short-circuit winner satisfies: <span
+class="math display">\[\begin{equation}
+  \mathbb{E}[Q_{\text{winner}}] \geq \max_i \mu_i \cdot \left(1 -
+\prod_{i=1}^n (1 - P(\sigma_i \geq \tau))\right)
+\end{equation}\]</span></em></p>
+</div>
+<div class="proof">
+<p><em>Proof.</em> The winner is selected from the set of models that
+cross threshold <span class="math inline">\(\tau\)</span>. By the
+first-order stochastic dominance of the maximum over any individual
+order statistic, the expected quality of the winner is at least as large
+as the best individual model’s expected quality multiplied by the
+probability that at least one model crosses threshold. The complement
+probability that no model crosses is <span class="math inline">\(\prod_i
+(1 - P(\sigma_i \geq \tau))\)</span>. ◻</p>
+</div>
+<h2 id="sequential-hypothesis-test-interpretation">Sequential Hypothesis
+Test Interpretation</h2>
+<p>The short-circuit condition (<a href="#eq:shortcircuit"
+data-reference-type="ref"
+data-reference="eq:shortcircuit">[eq:shortcircuit]</a>) is a one-sided
+sequential probability ratio test (SPRT) <span class="citation"
+data-cites="wald1945sequential">(Wald 1945)</span> with: <span
+class="math display">\[\begin{align}
+  H_0 &amp;: \text{model output is not yet high-confidence} \\
+  H_1 &amp;: \text{model output exceeds quality threshold}
+\end{align}\]</span> The acceptance boundary is <span
+class="math inline">\(A = \tau = 0.85\)</span>. Under <span
+class="math inline">\(H_1\)</span>, the expected number of tokens before
+acceptance is <span class="math inline">\(O(T_{\min} / \Delta)\)</span>
+where <span class="math inline">\(\Delta\)</span> is the gap between the
+model’s true quality and <span class="math inline">\(\tau\)</span>.</p>
+<h2 id="provider-routing-as-multi-armed-bandit">Provider Routing as
+Multi-Armed Bandit</h2>
+<p>Over a session of <span class="math inline">\(T\)</span> tasks,
+provider selection is modeled as a multi-armed bandit with arms <span
+class="math inline">\(\{m_1, \ldots, m_n\}\)</span> and unknown reward
+distributions. The budget tier mechanism implements an Upper Confidence
+Bound (UCB1) policy <span class="citation"
+data-cites="auer2002finite">(Auer et al. 2002)</span>: <span
+class="math display">\[\begin{equation}
+  a_t = \arg\max_i \left(\hat{\mu}_i + \sqrt{\frac{2 \ln t}{n_i}}\right)
+  \label{eq:ucb}
+\end{equation}\]</span> where <span
+class="math inline">\(\hat{\mu}_i\)</span> is the empirical win rate of
+model <span class="math inline">\(i\)</span> and <span
+class="math inline">\(n_i\)</span> is its selection count. The budget
+ceiling caps exploration at the user’s cost tolerance.</p>
+<h1 id="sec:compliance">Tropical Compliance Lattice</h1>
+<h2 id="regulatory-constraint-model">Regulatory Constraint Model</h2>
+<p>Let <span class="math inline">\(\mathcal{R} = \{r_1, \ldots,
+r_k\}\)</span> be the set of applicable regulatory frameworks, and let
+<span class="math inline">\(a \in \mathcal{A}\)</span> be a proposed
+action (e.g., file deletion, database write). Each regulation <span
+class="math inline">\(r_i\)</span> induces a constraint function: <span
+class="math display">\[\begin{equation}
+  c_i : \mathcal{A} \times \mathcal{D} \to \{\textsc{Permit},
+\textsc{Conditional}, \textsc{Block}\}
+\end{equation}\]</span> where <span
+class="math inline">\(\mathcal{D}\)</span> is the space of data contexts
+(jurisdiction, retention age, data type, backup status, etc.).</p>
+<p>We encode verdicts numerically as <span class="math inline">\(v_i \in
+\{0, 0.5, 1\}\)</span> for Permit, Conditional, and Block
+respectively.</p>
+<h2 id="lagrangian-formulation">Lagrangian Formulation</h2>
+<div class="definition">
+<p><strong>Definition 3</strong> (Compliance Lagrangian). <em>The
+compliance Lagrangian for action <span class="math inline">\(a\)</span>
+with data context <span class="math inline">\(d\)</span> is: <span
+class="math display">\[\begin{equation}
+  \mathcal{L}(a, d) = \sum_{i=1}^{k} \lambda_i \cdot v_i(a, d)
+  \label{eq:lagrangian}
+\end{equation}\]</span> where <span class="math inline">\(\lambda_i &gt;
+0\)</span> is the weight of regulation <span
+class="math inline">\(r_i\)</span>. By convention, SOC II audit-log
+violations carry <span class="math inline">\(\lambda_i = 2\)</span>
+(non-negotiable); all others <span class="math inline">\(\lambda_i =
+1\)</span>.</em></p>
+</div>
+<div id="thm:compliance" class="theorem">
+<p><strong>Theorem 2</strong> (Compliance Condition). <em>Action <span
+class="math inline">\(a\)</span> is compliant with data context <span
+class="math inline">\(d\)</span> if and only if: <span
+class="math display">\[\begin{equation}
+  \mathcal{L}(a, d) = 0
+\end{equation}\]</span> Equivalently, <span
+class="math inline">\(a\)</span> is compliant iff no applicable
+regulation returns <span class="smallcaps">Block</span>.</em></p>
+</div>
+<div class="proof">
+<p><em>Proof.</em> <span class="math inline">\((\Rightarrow)\)</span> If
+any <span class="math inline">\(v_i = 1\)</span> (Block), then <span
+class="math inline">\(\lambda_i \cdot v_i \geq 1 &gt; 0\)</span>, so
+<span class="math inline">\(\mathcal{L} &gt; 0\)</span>. <span
+class="math inline">\((\Leftarrow)\)</span> If <span
+class="math inline">\(\mathcal{L} = 0\)</span> and all <span
+class="math inline">\(\lambda_i &gt; 0\)</span>, then all <span
+class="math inline">\(v_i = 0\)</span> (all Permit). Conditional
+verdicts (<span class="math inline">\(v_i = 0.5\)</span>) contribute
+<span class="math inline">\(0.5\lambda_i &gt; 0\)</span>, so <span
+class="math inline">\(\mathcal{L} = 0\)</span> implies no Conditional
+verdicts remain unresolved. ◻</p>
+</div>
+<h2 id="tropical-semiring-structure">Tropical Semiring Structure</h2>
+<p>The compliance lattice is naturally expressed over the tropical
+semiring. Define the <em>regulatory cost</em> of applying regulation
+<span class="math inline">\(r_i\)</span> to action <span
+class="math inline">\(a\)</span> as: <span
+class="math display">\[\begin{equation}
+  w_i(a) = \lambda_i \cdot v_i(a, d) \in \mathbb{R}_{\max}
+\end{equation}\]</span></p>
+<p>The overall compliance decision is the tropical sum of all regulatory
+costs: <span class="math display">\[\begin{equation}
+  \mathcal{L}(a) = \bigoplus_{i=1}^{k} w_i(a) = \max_i w_i(a)
+\end{equation}\]</span></p>
+<p>This is the <em>tropical linear form</em> of the decision problem.
+The compliance condition <span class="math inline">\(\mathcal{L}(a) =
+0\)</span> is equivalent to finding a point in the tropical halfspace
+<span class="math inline">\(\{a : \bigoplus_i w_i(a) \leq
+\mathbf{1}\}\)</span> where <span class="math inline">\(\mathbf{1} =
+0\)</span> is the tropical multiplicative identity.</p>
+<div class="proposition">
+<p><strong>Proposition 3</strong> (Lattice Dominance). <em>In the
+tropical structure, a single <span class="smallcaps">Block</span>
+verdict dominates all <span class="smallcaps">Permit</span> verdicts:
+<span class="math display">\[\begin{equation}
+  w_{\text{Block}} \oplus w_{\text{Permit}} = \max(1, 0) = 1 \neq 0
+\end{equation}\]</span> This formalizes the intuition that no number of
+compliant regulations can override a single blocking
+regulation.</em></p>
+</div>
+<h2 id="constraint-hierarchy">Constraint Hierarchy</h2>
+<p>The nine regulatory frameworks form a partial order by jurisdictional
+specificity and data type:</p>
+<div class="center">
+
+</div>
+<p>SOC II sits at the top of the lattice as the universal audit
+requirement. ISO 27001 forms the floor as the general information
+security standard applicable to all data.</p>
+<h2 id="audit-log-integrity">Audit Log Integrity</h2>
+<p>All compliance decisions are recorded in an append-only log with a
+SHA-256 hash chain: <span class="math display">\[\begin{equation}
+  h_t = \text{SHA256}(h_{t-1} \,\|\, \text{entry}_t)
+\end{equation}\]</span> where <span class="math inline">\(h_0 =
+0^{64}\)</span> (genesis hash). This satisfies SOC II CC6.1
+tamper-evidence requirements: any modification to a historical entry
+invalidates all subsequent hashes.</p>
+<h1 id="sec:privacy">Privacy-Aware Model Routing</h1>
+<p>Let <span class="math inline">\(\mathcal{K}\)</span> be a set of
+privacy-sensitive keywords (passwords, credentials, PHI, financial
+identifiers). The routing policy is:</p>
+<p><span class="math display">\[\begin{equation}
+  \text{route}(t) = \begin{cases}
+    \mathcal{M}_{\text{local}} &amp; \text{if } \exists\, k \in
+\mathcal{K} : k \subseteq t \\
+    \mathcal{M}_{\text{tier}(\hat{\tau})} &amp; \text{otherwise}
+  \end{cases}
+\end{equation}\]</span></p>
+<p>where <span class="math inline">\(\hat{\tau} =
+\min(\tau_{\text{user}}, \hat{\tau}_{\text{classify}}(t))\)</span> is
+the effective budget tier, capped at the user’s configured ceiling. The
+classifier <span
+class="math inline">\(\hat{\tau}_{\text{classify}}\)</span> maps task
+text to <span class="math inline">\(\{\text{free}, \text{standard},
+\text{performance}\}\)</span> via keyword heuristics over vision, speed,
+and complexity signal vocabularies.</p>
+<h1 id="sec:impl">Implementation</h1>
+<p>The system is implemented in Python 3.12+ using <code>asyncio</code>
+for concurrent model streaming. Key implementation decisions:</p>
+<p><strong>Streaming protocol.</strong> All providers expose
+OpenAI-compatible server-sent events (SSE) endpoints. A unified
+<code>_stream_direct</code> function handles provider-specific
+authentication headers while sharing token processing logic.</p>
+<p><strong>Non-chat model filtering.</strong> OpenRouter’s model catalog
+includes audio, image, and embedding models that reject chat completion
+requests. We filter using both keyword matching on model IDs and the
+<code>output_modalities</code> field in OpenRouter’s model metadata.</p>
+<p><strong>Rate limit management.</strong> A session-scoped blacklist
+tracks consecutive 429 responses per model. Models exceeding threshold
+<span class="math inline">\(\theta = 2\)</span> consecutive rate limits
+are dropped from the session pool without user intervention.</p>
+<p><strong>Loop detection.</strong> An action signature <span
+class="math inline">\(s_t = (\text{type}_t,
+\text{desc}_{t,1:60})\)</span> is computed at each step. If <span
+class="math inline">\(s_t = s_{t-1} = \cdots = s_{t-k}\)</span> for
+<span class="math inline">\(k = 3\)</span>, the system injects a
+corrective system message into the model’s context, breaking the loop
+without user intervention.</p>
+<div id="tab:providers">
+<table>
+<caption>Provider integration summary</caption>
+<thead>
+<tr>
+<th style="text-align: left;">Provider</th>
+<th style="text-align: left;">Base URL</th>
+<th style="text-align: left;">Auth Header</th>
+<th style="text-align: left;">Vision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Ollama</td>
+<td style="text-align: left;">localhost:11434</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;">Model-dependent</td>
+</tr>
+<tr>
+<td style="text-align: left;">OpenRouter</td>
+<td style="text-align: left;">openrouter.ai/api/v1</td>
+<td style="text-align: left;">Authorization</td>
+<td style="text-align: left;">Model-dependent</td>
+</tr>
+<tr>
+<td style="text-align: left;">OpenAI</td>
+<td style="text-align: left;">api.openai.com/v1</td>
+<td style="text-align: left;">Authorization</td>
+<td style="text-align: left;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Anthropic</td>
+<td style="text-align: left;">api.anthropic.com/v1</td>
+<td style="text-align: left;">x-api-key</td>
+<td style="text-align: left;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Google</td>
+<td style="text-align: left;">generativelanguage.googleapis.com</td>
+<td style="text-align: left;">Authorization</td>
+<td style="text-align: left;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">xAI</td>
+<td style="text-align: left;">api.x.ai/v1</td>
+<td style="text-align: left;">Authorization</td>
+<td style="text-align: left;">Partial</td>
+</tr>
+<tr>
+<td style="text-align: left;">Mistral</td>
+<td style="text-align: left;">api.mistral.ai/v1</td>
+<td style="text-align: left;">Authorization</td>
+<td style="text-align: left;"></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h1 id="sec:eval">Evaluation</h1>
+<p><em>Note: Formal benchmarks are ongoing. This section describes the
+evaluation methodology; results will be included in the camera-ready
+version.</em></p>
+<h2 id="racing-efficiency">Racing Efficiency</h2>
+<p>We measure the <em>race overhead</em> <span
+class="math inline">\(\Delta_r\)</span>: the latency difference between
+the short-circuit winner’s response time and the time the winning model
+would have taken running in isolation. Negative <span
+class="math inline">\(\Delta_r\)</span> (common with fast draft models)
+indicates the race accelerated the effective response time.</p>
+<h2 id="compliance-accuracy">Compliance Accuracy</h2>
+<p>We construct a synthetic dataset of 500 action proposals with known
+regulatory ground truth (verified by legal review), spanning all nine
+covered frameworks. We measure precision and recall of the compliance
+decision at the action level, with particular attention to false
+negatives (actions incorrectly permitted).</p>
+<h2 id="loop-convergence">Loop Convergence</h2>
+<p>On a suite of 50 multi-step desktop tasks, we measure the frequency
+and depth of action loops before and after the loop-detection
+intervention. We report mean steps to task completion and the fraction
+of tasks requiring loop-break injections.</p>
+<h1 id="sec:related">Related Work</h1>
+<p><strong>Speculative decoding.</strong> Leviathan et al. <span
+class="citation" data-cites="leviathan2023fast">(Leviathan et al.
+2023)</span> and Chen et al. <span class="citation"
+data-cites="chen2023accelerating">(Chen et al. 2023)</span> introduced
+speculative decoding using a draft-verifier pair from the same model
+family. Our work extends this to heterogeneous multi-provider ensembles
+without the rejection-sampling acceptance step.</p>
+<p><strong>LLM agent frameworks.</strong> AutoGPT <span class="citation"
+data-cites="autogpt2023">(Richards 2023)</span>, LangChain <span
+class="citation" data-cites="chase2022langchain">(Chase 2022)</span>,
+and similar frameworks implement sequential single-model pipelines.
+OSWorld <span class="citation" data-cites="xie2024osworld">(<span
+class="nocase">Xie et al.</span> 2024)</span> and WebArena <span
+class="citation" data-cites="zhou2023webarena">(<span
+class="nocase">Zhou et al.</span> 2024)</span> provide desktop and web
+benchmarks but evaluate single-model baselines. None race heterogeneous
+providers in parallel.</p>
+<p><strong>Formal compliance verification.</strong> Existing regulatory
+compliance tools (e.g., OneTrust, BigID) operate at the data catalog
+level, not at the action execution level. Our work is the first to
+enforce regulatory compliance as a precondition within an autonomous
+agent’s action execution loop.</p>
+<p><strong>Tropical geometry in computer science.</strong> Tropical
+methods have been applied to scheduling <span class="citation"
+data-cites="gaubert1997methods">(Gaubert 1997)</span>, program
+analysis <span class="citation"
+data-cites="chaudhuri2010continuity">(Chaudhuri et al. 2010)</span>, and
+network routing <span class="citation"
+data-cites="gondran2008graphs">(Gondran and Minoux 2008)</span>.
+Application to regulatory constraint satisfaction is, to our knowledge,
+novel.</p>
+<h1 id="conclusion">Conclusion</h1>
+<p>We have presented Speculative Agent, a system that unifies
+cross-vendor LLM racing, tropical compliance lattice enforcement, and
+privacy-aware routing into a coherent autonomous agent architecture. The
+key theoretical contributions are:</p>
+<ol>
+<li><p>A formal analysis of multi-provider speculative racing as an
+optimal stopping problem with quality guarantees (Theorem <a
+href="#thm:quality" data-reference-type="ref"
+data-reference="thm:quality">1</a>).</p></li>
+<li><p>A compliance decision procedure based on tropical linear algebra
+that is both computationally efficient and formally complete with
+respect to a family of regulatory constraints (Theorem <a
+href="#thm:compliance" data-reference-type="ref"
+data-reference="thm:compliance">2</a>).</p></li>
+<li><p>A privacy routing policy with formal non-exfiltration guarantees
+for keyword-detectable sensitive content.</p></li>
+</ol>
+<p>Future work includes: (1) learned confidence scoring to replace the
+heuristic threshold; (2) full UCB1 bandit implementation for automatic
+provider selection; (3) extension of the compliance lattice to
+additional jurisdictions (Brazil LGPD, Canada PIPEDA, China PIPL); and
+(4) formal verification of the audit log integrity property.</p>
+<div id="refs" class="references csl-bib-body hanging-indent"
+role="list">
+<div id="ref-anthropic2024claude" class="csl-entry" role="listitem">
+Anthropic. 2024. <em>Claude 3 Model Card</em>. <a
+href="https://www.anthropic.com/claude">https://www.anthropic.com/claude</a>.
+</div>
+<div id="ref-auer2002finite" class="csl-entry" role="listitem">
+Auer, Peter, Nicolo Cesa-Bianchi, and Paul Fischer. 2002.
+<span>“Finite-Time Analysis of the Multiarmed Bandit Problem.”</span>
+<em>Machine Learning</em> 47: 235–56.
+</div>
+<div id="ref-chase2022langchain" class="csl-entry" role="listitem">
+Chase, Harrison. 2022. <em><span>LangChain</span>: Building Applications
+with <span>LLMs</span> Through Composability</em>. <a
+href="https://github.com/langchain-ai/langchain">https://github.com/langchain-ai/langchain</a>.
+</div>
+<div id="ref-chaudhuri2010continuity" class="csl-entry" role="listitem">
+Chaudhuri, Swarat, Sumit Gulwani, and Roberto Lublinerman. 2010.
+<span>“Continuity and Robustness of Programs.”</span> <em>ACM SIGPLAN
+Notices</em> 45: 169–80.
+</div>
+<div id="ref-chen2023accelerating" class="csl-entry" role="listitem">
+Chen, Charlie, Sebastian Borgeaud, Geoffrey Irving, Jean-Baptiste
+Lespiau, Laurent Sifre, and John Jumper. 2023. <span>“Accelerating Large
+Language Model Decoding with Speculative Sampling.”</span> <em>arXiv
+Preprint arXiv:2302.01318</em>.
+</div>
+<div id="ref-gaubert1997methods" class="csl-entry" role="listitem">
+Gaubert, Stéphane. 1997. <span>“Methods and Applications of <span
+class="nocase">(max,+)</span> Linear Algebra.”</span> <em>STACS 97</em>,
+261–82.
+</div>
+<div id="ref-gondran2008graphs" class="csl-entry" role="listitem">
+Gondran, Michel, and Michel Minoux. 2008. <em>Graphs, Dioids and
+Semirings: New Models and Algorithms</em>. Springer.
+</div>
+<div id="ref-google2024gemini" class="csl-entry" role="listitem">
+Google DeepMind. 2024. <em>Gemini: A Family of Highly Capable Multimodal
+Models</em>. <a
+href="https://arxiv.org/abs/2312.11805">https://arxiv.org/abs/2312.11805</a>.
+</div>
+<div id="ref-leviathan2023fast" class="csl-entry" role="listitem">
+Leviathan, Yaniv, Matan Kalman, and Yossi Matias. 2023. <span>“Fast
+Inference from Transformers via Speculative Decoding.”</span>
+<em>International Conference on Machine Learning</em>, 19274–86.
+</div>
+<div id="ref-maclagan2015introduction" class="csl-entry"
+role="listitem">
+Maclagan, Diane, and Bernd Sturmfels. 2015. <em>Introduction to Tropical
+Geometry</em>. Vol. 161. American Mathematical Society.
+</div>
+<div id="ref-openai2024gpt4" class="csl-entry" role="listitem">
+OpenAI. 2024. <em><span>GPT-4</span> Technical Report</em>. OpenAI. <a
+href="https://openai.com/research/gpt-4">https://openai.com/research/gpt-4</a>.
+</div>
+<div id="ref-autogpt2023" class="csl-entry" role="listitem">
+Richards, Toran Bruce. 2023. <em><span>AutoGPT</span>: An Autonomous
+<span>GPT-4</span> Experiment</em>. <a
+href="https://github.com/Significant-Gravitas/AutoGPT">https://github.com/Significant-Gravitas/AutoGPT</a>.
+</div>
+<div id="ref-wald1945sequential" class="csl-entry" role="listitem">
+Wald, Abraham. 1945. <span>“Sequential Tests of Statistical
+Hypotheses.”</span> <em>The Annals of Mathematical Statistics</em> 16
+(2): 117–86.
+</div>
+<div id="ref-xie2024osworld" class="csl-entry" role="listitem">
+<span class="nocase">Xie, Tianbao, Danyang Zhang, Jixuan Chen, et
+al.</span> 2024. <span>“<span>OSWorld</span>: Benchmarking Multimodal
+Agents for Open-Ended Tasks in Real Computer Environments.”</span>
+<em>Advances in Neural Information Processing Systems</em>.
+</div>
+<div id="ref-zhou2023webarena" class="csl-entry" role="listitem">
+<span class="nocase">Zhou, Shuyan, Frank F Xu, Hao Zhu, et al.</span>
+2024. <span>“<span>WebArena</span>: A Realistic Web Environment for
+Building Autonomous Agents.”</span> <em>International Conference on
+Learning Representations</em>.
+</div>
+</div>
+</body>
+</html>

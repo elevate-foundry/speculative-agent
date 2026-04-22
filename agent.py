@@ -383,6 +383,17 @@ async def interactive_repl(agent: Agent):
     print("  Commands : /models /history /thoughts /quit")
     print("═" * 60 + "\n")
 
+    # Enable up/down arrow history + Ctrl-R search via readline
+    import readline as _rl
+    _history_file = os.path.expanduser("~/.agent_history")
+    try:
+        _rl.read_history_file(_history_file)
+    except FileNotFoundError:
+        pass
+    _rl.set_history_length(500)
+    import atexit as _atexit
+    _atexit.register(_rl.write_history_file, _history_file)
+
     while True:
         try:
             task = input("Task → ").strip()
@@ -443,6 +454,18 @@ async def main():
 
     print("Discovering and warming up Ollama models...")
     models, hw = await discover_and_warmup(verbose=True)
+
+    # Advisory: if user requested paid tier but no direct keys are set, tell them what to add
+    import config as _cfg
+    if _cfg.BUDGET_TIER in ("standard", "performance"):
+        from providers import active_providers as _ap, PROVIDER_REGISTRY as _pr
+        inactive = [p.name for p in _pr if not p.api_key]
+        has_paid = any(m.provider not in ("ollama", "openrouter") for m in models)
+        if not has_paid and inactive:
+            print(f"\n[agent] ⚠  Budget={_cfg.BUDGET_TIER} but no direct provider keys found.")
+            print(f"[agent]    Paid models require direct API keys (no OpenRouter balance needed).")
+            print(f"[agent]    Set any of: {', '.join(f'{p.upper()}_API_KEY' for p in inactive)}")
+            print(f"[agent]    Racing with free models only for now.\n")
 
     agent = Agent(models=models, hw=hw, verbose=not args.quiet)
 

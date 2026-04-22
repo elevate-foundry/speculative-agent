@@ -146,9 +146,6 @@ async def _stream_ollama(
                 token = chunk.get("response", "")
                 if token:
                     stream_obj.tokens.append(token)
-                    if live_output:
-                        sys.stdout.write(f"{color}{token}{_RESET}")
-                        sys.stdout.flush()
                 if chunk.get("done", False):
                     stream_obj.done = True
                     return
@@ -216,9 +213,6 @@ async def _stream_openrouter(
                 token = delta.get("content", "")
                 if token:
                     stream_obj.tokens.append(token)
-                    if live_output:
-                        sys.stdout.write(f"{color}{token}{_RESET}")
-                        sys.stdout.flush()
                 finish = chunk.get("choices", [{}])[0].get("finish_reason")
                 if finish and finish != "null":
                     stream_obj.done = True
@@ -290,9 +284,6 @@ async def _stream_direct(
                 token = delta.get("content", "")
                 if token:
                     stream_obj.tokens.append(token)
-                    if live_output:
-                        sys.stdout.write(f"{color}{token}{_RESET}")
-                        sys.stdout.flush()
                 finish = chunk.get("choices", [{}])[0].get("finish_reason")
                 if finish and finish != "null" and finish is not None:
                     stream_obj.done = True
@@ -395,11 +386,42 @@ async def supervise_race(
     winning_stream: Optional[ModelStream] = None
 
     if verbose:
-        print(f"\n[supervisor] Racing {len(model_names)} model(s) — watching live...\n")
+        print(f"\n[supervisor] Racing {len(model_names)} model(s)...\n")
+
+    _dashboard_lines = 0  # track how many lines the dashboard occupies
+
+    def _redraw_dashboard() -> None:
+        nonlocal _dashboard_lines
+        # Move cursor up to overwrite previous dashboard
+        if _dashboard_lines > 0:
+            sys.stdout.write(f"\033[{_dashboard_lines}A")
+        lines = []
+        for s in streams.values():
+            color = _MODEL_COLORS.get(s.model_name, "")
+            short = s.model_name.split(":")[0].split("/")[-1][:18]
+            if s.error:
+                state = f"\033[91m✗ ERR\033[0m"
+            elif s.cancelled:
+                state = f"\033[2m✗ cancel\033[0m"
+            elif s.done:
+                score = score_reasoning(s.text)
+                state = f"\033[32m✓ {s.elapsed_ms:.0f}ms  score={score:.2f}\033[0m"
+            else:
+                # Show last ~40 chars of partial output
+                snippet = s.text.replace("\n", " ")[-40:].strip()
+                state = f"\033[2m{s.token_count:>3}tok  {snippet}\033[0m"
+            lines.append(f"  {color}{short:<20}\033[0m  {state}")
+        output = "\n".join(lines) + "\n"
+        sys.stdout.write(output)
+        sys.stdout.flush()
+        _dashboard_lines = len(lines)
 
     try:
         while not all(s.done or s.cancelled for s in streams.values()):
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.30)
+
+            if verbose:
+                _redraw_dashboard()
 
             for name, s in streams.items():
                 if s.done or s.cancelled or s.token_count < MIN_TOKENS_FOR_SHORTCIRCUIT:
@@ -408,23 +430,24 @@ async def supervise_race(
                 score = score_reasoning(s.text)
                 s.confidence_history.append(score)
 
-                if verbose and s.token_count % 20 == 0:
-                    print(f"  [{name}] tokens={s.token_count} score={score:.2f}")
-
                 if score >= SHORT_CIRCUIT_THRESHOLD and winner is None:
                     action = parse_action_from_text(s.text, name)
                     if action:
                         winner = action
                         winning_stream = s
                         if verbose:
-                            print(f"\n[supervisor] SHORT-CIRCUIT: {name} won at "
-                                  f"{score:.0%} confidence after {s.token_count} tokens "
-                                  f"({s.elapsed_ms:.0f}ms)")
+                            _redraw_dashboard()
+                            print(f"\n[supervisor] ⚡ SHORT-CIRCUIT: {name} "
+                                  f"{score:.0%} confidence  {s.token_count} tok  "
+                                  f"{s.elapsed_ms:.0f}ms")
                         cancel_event.set()
                         break
 
             if cancel_event.is_set():
                 break
+
+        if verbose:
+            _redraw_dashboard()  # final redraw showing all done
 
     except asyncio.CancelledError:
         cancel_event.set()

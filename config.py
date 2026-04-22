@@ -19,9 +19,69 @@ OLLAMA_BASE = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
-# Max number of OpenRouter free models to include in the race.
-# They are ranked by context window size (larger = better for agentic tasks).
+# Max number of OpenRouter models to include in the race.
 OPENROUTER_MAX_MODELS = int(os.environ.get("OPENROUTER_MAX_MODELS", "5"))
+
+# Budget tiers — controls which paid models are added to the race pool.
+# free       : only :free models (default)
+# standard   : adds fast/cheap paid models (~$0.0002/tok)
+# performance: adds top-tier models with vision (~$0.005/tok)
+BUDGET_TIER = os.environ.get("AGENT_BUDGET", "free").lower()
+
+# Curated paid model lists per tier (OpenRouter IDs)
+_STANDARD_MODELS = [
+    "openai/gpt-4o-mini",
+    "anthropic/claude-haiku-20240307",
+    "google/gemini-flash-1.5",
+    "mistralai/mistral-small-3.1-24b-instruct",
+]
+
+_PERFORMANCE_MODELS = [
+    "openai/gpt-4o",
+    "anthropic/claude-sonnet-4",
+    "google/gemini-2.5-pro-preview",
+    "openai/o3",
+]
+
+# Keywords that signal the task needs a higher tier
+_VISION_KEYWORDS = [
+    "screenshot", "screen", "look at", "what do you see", "what's on",
+    "click", "find the button", "read the page", "what is shown",
+]
+_SPEED_KEYWORDS = [
+    "fast", "quickly", "urgent", "asap", "immediately", "right now",
+    "hurry", "speed", "instant",
+]
+_COMPLEX_KEYWORDS = [
+    "analyze", "write a report", "summarize", "compare", "research",
+    "explain in detail", "plan", "strategy", "optimize",
+]
+
+
+def classify_task_tier(task: str) -> str:
+    """
+    Auto-detect the appropriate budget tier for a task.
+    Returns 'free', 'standard', or 'performance'.
+    Never upgrades beyond the user's configured BUDGET_TIER.
+    """
+    task_lower = task.lower()
+
+    needs_vision = any(kw in task_lower for kw in _VISION_KEYWORDS)
+    needs_speed = any(kw in task_lower for kw in _SPEED_KEYWORDS)
+    needs_complex = any(kw in task_lower for kw in _COMPLEX_KEYWORDS)
+
+    if needs_vision or (needs_speed and needs_complex):
+        recommended = "performance"
+    elif needs_speed or needs_complex:
+        recommended = "standard"
+    else:
+        recommended = "free"
+
+    # Never exceed user's budget ceiling
+    tier_order = ["free", "standard", "performance"]
+    ceiling = tier_order.index(BUDGET_TIER)
+    recommended_idx = tier_order.index(recommended)
+    return tier_order[min(recommended_idx, ceiling)]
 
 # Models to include in the race. Override with AGENT_MODELS env var (comma-separated).
 # Defaults to a hand-picked set balancing speed, reasoning, and code ability.
@@ -144,12 +204,12 @@ async def list_local_models() -> list[ModelInfo]:
             raise RuntimeError(f"Cannot reach Ollama at {OLLAMA_BASE}: {e}")
 
 
-async def list_openrouter_models() -> list[ModelInfo]:
+async def list_openrouter_models(tier: str = "free") -> list[ModelInfo]:
     """
-    Auto-discover free OpenRouter models.
-    If OPENROUTER_MODELS env var is set, use that list (comma-separated).
-    Otherwise fetch all models from the API, keep only :free ones,
-    and rank by context_length descending (larger context = better for agents).
+    Discover OpenRouter models for the given budget tier.
+    - free        : all :free models, ranked by context length
+    - standard    : free models + _STANDARD_MODELS
+    - performance : free models + _STANDARD_MODELS + _PERFORMANCE_MODELS
     Caps at OPENROUTER_MAX_MODELS.
     """
     if not OPENROUTER_API_KEY:
@@ -168,25 +228,34 @@ async def list_openrouter_models() -> list[ModelInfo]:
 
         all_models = data.get("data", [])
 
+        catalog = {m["id"]: m for m in all_models}
+
         if env_override:
             wanted = {m.strip() for m in env_override.split(",") if m.strip()}
-            candidates = [m for m in all_models if m["id"] in wanted]
+            free_pool = [m for m in all_models if m["id"] in wanted]
+            paid_ids: list[str] = []
         else:
-            # Keep only genuinely free models (prompt cost == 0)
-            candidates = [
+            # Free pool: :free tag or zero prompt cost
+            free_pool = [
                 m for m in all_models
                 if ":free" in m["id"]
                 or float((m.get("pricing") or {}).get("prompt", "1") or "1") == 0.0
             ]
+            free_pool.sort(key=lambda m: int(m.get("context_length") or 0), reverse=True)
+            free_pool = free_pool[:OPENROUTER_MAX_MODELS]
 
-        # Rank by context_length descending — more context = more useful for agents
-        candidates.sort(key=lambda m: int(m.get("context_length") or 0), reverse=True)
+            # Paid additions based on tier
+            paid_ids = []
+            if tier in ("standard", "performance"):
+                paid_ids += _STANDARD_MODELS
+            if tier == "performance":
+                paid_ids += _PERFORMANCE_MODELS
 
-        # Cap to max
-        candidates = candidates[:OPENROUTER_MAX_MODELS]
+        paid_pool = [catalog[mid] for mid in paid_ids if mid in catalog]
+        combined = free_pool + paid_pool
 
         models = []
-        for m in candidates:
+        for m in combined:
             pricing = m.get("pricing") or {}
             cost = float(pricing.get("prompt", "0") or "0")
             ctx = int(m.get("context_length") or 0)
@@ -270,10 +339,13 @@ async def discover_and_warmup(verbose: bool = True) -> tuple[list[ModelInfo], Ha
     or_models = []
     if OPENROUTER_API_KEY:
         if verbose:
-            print("[config] OPENROUTER_API_KEY detected — fetching free cloud models...")
-        or_models = await list_openrouter_models()
+            tier_label = BUDGET_TIER
+            print(f"[config] OPENROUTER_API_KEY detected — fetching models (budget={tier_label})...")
+        or_models = await list_openrouter_models(tier=BUDGET_TIER)
         if verbose and or_models:
-            print(f"[config] OpenRouter free models: {[m.name for m in or_models]}")
+            free_count = sum(1 for m in or_models if m.cost_per_token == 0.0)
+            paid_count = len(or_models) - free_count
+            print(f"[config] OpenRouter: {free_count} free, {paid_count} paid models ready")
     else:
         if verbose:
             print("[config] No OPENROUTER_API_KEY — skipping cloud models (set it to add free cloud racing)")

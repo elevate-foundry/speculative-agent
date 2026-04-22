@@ -22,7 +22,10 @@ import json
 import tempfile
 from typing import Optional
 
-from config import discover_and_warmup, HardwareProfile, ModelInfo, OLLAMA_BASE
+from config import (
+    discover_and_warmup, HardwareProfile, ModelInfo, OLLAMA_BASE,
+    classify_task_tier, list_openrouter_models, BUDGET_TIER, OPENROUTER_API_KEY,
+)
 from supervisor import supervise_race, print_race_summary
 from executor import execute, Action, ActionResult
 
@@ -70,11 +73,13 @@ If the task is complete, output noop with confidence 1.0.
 
 class Agent:
     def __init__(self, models: list[ModelInfo], hw: HardwareProfile, verbose: bool = True):
-        self.models = models
+        self.models = models           # base pool (local + free cloud)
         self.hw = hw
         self.verbose = verbose
         self.history: list[dict] = []  # task + action + result log
         self.last_streams = []          # raw ModelStream objects from last race
+        self._or_cache: dict[str, list[ModelInfo]] = {}  # tier -> upgraded OR models
+        self.session_cost_usd: float = 0.0
 
     def _get_screen_context(self) -> tuple[str, Optional[str]]:
         """
@@ -116,6 +121,17 @@ class Agent:
         parts.append(f"\n=== Current task ===\n{task}")
         return "\n".join(parts)
 
+    async def _models_for_tier(self, tier: str) -> list[ModelInfo]:
+        """Return the model pool for a given budget tier, upgrading OR models if needed."""
+        if tier == "free" or not OPENROUTER_API_KEY:
+            return self.models
+        if tier not in self._or_cache:
+            upgraded_or = await list_openrouter_models(tier=tier)
+            # Merge: keep local models, replace OR pool with upgraded set
+            local = [m for m in self.models if m.provider == "ollama"]
+            self._or_cache[tier] = local + upgraded_or
+        return self._or_cache[tier]
+
     async def run_task(self, task: str, max_steps: int = 20, max_retries_per_step: int = 2) -> Optional[ActionResult]:
         """
         Infinite pipeline mode: races models, executes the winner's action, feeds
@@ -123,7 +139,12 @@ class Agent:
         max_steps is reached. Each step can retry up to max_retries_per_step times
         on failure before moving on.
         """
-        model_names = self.models  # pass full ModelInfo so provider is preserved
+        # Auto-detect best budget tier for this task
+        tier = classify_task_tier(task)
+        if tier != "free" and self.verbose:
+            print(f"[agent] Task classifier: tier={tier!r} — upgrading model pool...")
+        active_models = await self._models_for_tier(tier)
+
         last_result: Optional[ActionResult] = None
         consecutive_failures = 0
 
@@ -142,7 +163,7 @@ class Agent:
                     screenshot_b64 = base64.b64encode(f.read()).decode()
 
             action, streams = await supervise_race(
-                model_names=model_names,
+                model_names=active_models,
                 prompt=prompt,
                 system_prompt=SYSTEM_PROMPT,
                 ollama_base=OLLAMA_BASE,
@@ -198,11 +219,25 @@ class Agent:
                 consecutive_failures = 0
                 continue
 
+            # Track cost for paid models
+            winning_model = next((m for m in active_models if m.name == action.model_source), None)
+            step_cost = 0.0
+            if winning_model and winning_model.cost_per_token > 0:
+                # Rough estimate: tokens in stream * cost_per_token
+                winning_stream = next((s for s in streams if s.model_name == action.model_source), None)
+                tokens_used = winning_stream.token_count if winning_stream else 0
+                step_cost = tokens_used * winning_model.cost_per_token
+                self.session_cost_usd += step_cost
+                if self.verbose and step_cost > 0:
+                    print(f"[agent] 💳 Step cost: ${step_cost:.5f}  |  Session total: ${self.session_cost_usd:.4f}")
+
             entry = {
                 "task": task,
                 "step": step,
                 "action_type": action.action_type,
                 "model": action.model_source,
+                "tier": tier,
+                "cost_usd": step_cost,
                 "description": action.description,
                 "success": result.success,
                 "result": result.output[:500] if result.output else "",
@@ -237,10 +272,15 @@ class Agent:
         print("\n" + "═" * 60)
         print("  SESSION HISTORY")
         print("─" * 60)
+        total_cost = sum(h.get("cost_usd", 0) for h in self.history)
         for i, h in enumerate(self.history, 1):
             status = "✓" if h["success"] else "✗"
-            step = f"s{h['step']} " if "step" in h else ""
-            print(f"  {i}. [{status}] {step}[{h['model']}] {h['action_type']}: {h['task'][:55]}")
+            step = f"s{h.get('step','?')} " if "step" in h else ""
+            cost = f" ${h['cost_usd']:.5f}" if h.get("cost_usd") else ""
+            tier = f" [{h.get('tier','free')}]" if h.get("tier", "free") != "free" else ""
+            print(f"  {i}. [{status}] {step}[{h['model']}]{tier} {h['action_type']}: {h['task'][:45]}{cost}")
+        if total_cost > 0:
+            print(f"\n  Session spend: ${total_cost:.4f} USD")
         print("═" * 60)
 
     def show_thoughts(self):
@@ -309,7 +349,15 @@ async def main():
     parser.add_argument("--list-models", action="store_true", help="List available models and exit")
     parser.add_argument("--quiet", action="store_true", help="Suppress supervisor stream logs")
     parser.add_argument("--max-steps", type=int, default=20, help="Max pipeline steps per task (default 20)")
+    parser.add_argument("--budget", choices=["free", "standard", "performance"], default=None,
+                        help="Budget ceiling: free (default) | standard | performance. "
+                             "Can also set via AGENT_BUDGET env var.")
     args = parser.parse_args()
+
+    if args.budget:
+        os.environ["AGENT_BUDGET"] = args.budget
+        import config as _cfg
+        _cfg.BUDGET_TIER = args.budget
 
     print("Discovering and warming up Ollama models...")
     models, hw = await discover_and_warmup(verbose=True)

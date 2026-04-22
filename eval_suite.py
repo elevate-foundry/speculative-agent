@@ -884,6 +884,7 @@ def generate_eval_html(results: list) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Compliance Lattice — Test Registry</title>
 <link rel="canonical" href="{EVAL_PAGE_URL}">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
 <style>
   body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
         max-width:1100px;margin:0 auto;padding:1.5rem 1rem;color:#24292e}}

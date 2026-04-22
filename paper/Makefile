@@ -27,7 +27,7 @@ html: $(TEX) $(BIB) style.css header.html
 	  --include-before-body=header.html \
 	  --metadata title="Speculative Racing with Tropical Compliance Lattices" \
 	  --metadata "lang=en" \
-	  --variable "header-includes=<link rel='canonical' href='https://elevate-foundry.github.io/speculative-agent/'>" \
+	  --variable "header-includes=<link rel='canonical' href='https://elevate-foundry.github.io/speculative-agent/'><link rel='icon' type='image/svg+xml' href='favicon.svg'>" \
 	  -o $(MAIN).html
 	@echo "\n✓ Built $(MAIN).html — open with: open $(MAIN).html"
 

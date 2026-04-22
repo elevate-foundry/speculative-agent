@@ -362,9 +362,17 @@ class Agent:
 
 
 async def interactive_repl(agent: Agent):
+    import executor as _exe
+    autonomy = _exe.AUTONOMY
+    budget = os.environ.get("AGENT_BUDGET", "free")
+    autonomy_icon = {"off": "🔒 approve-all", "normal": "⚡ smart-approve", "full": "🤖 fully autonomous"}
+    budget_icon   = {"free": "free", "standard": "💳 standard", "performance": "💎 performance"}
     print("\n" + "═" * 60)
     print("  Machine Control Agent — Interactive Mode")
-    print("  Commands: /models /history /thoughts /quit")
+    print(f"  Autonomy : {autonomy_icon.get(autonomy, autonomy)}")
+    print(f"  Budget   : {budget_icon.get(budget, budget)}")
+    print(f"  Models   : {len(agent.models)} active  ({', '.join(m.provider for m in agent.models[:3])}{'...' if len(agent.models) > 3 else ''})")
+    print("  Commands : /models /history /thoughts /quit")
     print("═" * 60 + "\n")
 
     while True:
@@ -417,6 +425,13 @@ async def main():
         os.environ["AGENT_AUTONOMY"] = args.autonomy
         import executor as _exe
         _exe.AUTONOMY = args.autonomy
+
+        # full autonomy → use performance models unless user explicitly capped budget
+        if args.autonomy == "full" and not args.budget:
+            os.environ["AGENT_BUDGET"] = "performance"
+            import config as _cfg
+            _cfg.BUDGET_TIER = "performance"
+            print("[agent] Autonomy=full: budget auto-upgraded to performance")
 
     print("Discovering and warming up Ollama models...")
     models, hw = await discover_and_warmup(verbose=True)

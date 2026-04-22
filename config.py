@@ -63,9 +63,17 @@ def classify_task_tier(task: str) -> str:
     Auto-detect the appropriate budget tier for a task.
     Returns 'free', 'standard', or 'performance'.
     Never upgrades beyond the user's configured BUDGET_TIER.
+    When AGENT_AUTONOMY=full, always uses the budget ceiling —
+    no task is too simple to deserve the best available model.
     """
-    task_lower = task.lower()
+    tier_order = ["free", "standard", "performance"]
+    ceiling = tier_order.index(BUDGET_TIER)
 
+    # In full autonomy mode, always use the ceiling tier
+    if os.environ.get("AGENT_AUTONOMY", "normal") == "full":
+        return tier_order[ceiling]
+
+    task_lower = task.lower()
     needs_vision = any(kw in task_lower for kw in _VISION_KEYWORDS)
     needs_speed = any(kw in task_lower for kw in _SPEED_KEYWORDS)
     needs_complex = any(kw in task_lower for kw in _COMPLEX_KEYWORDS)
@@ -77,9 +85,6 @@ def classify_task_tier(task: str) -> str:
     else:
         recommended = "free"
 
-    # Never exceed user's budget ceiling
-    tier_order = ["free", "standard", "performance"]
-    ceiling = tier_order.index(BUDGET_TIER)
     recommended_idx = tier_order.index(recommended)
     return tier_order[min(recommended_idx, ceiling)]
 

@@ -444,8 +444,9 @@ def infer_context(path: str, description: str = "") -> DataContext:
     _CRED_KW    = ("password", "passwd", "secret", "api_key", "token", "credential",
                    "ssh", "private_key", ".pem", ".p12", ".pfx", "keystore", "vault",
                    "auth", "bearer", "oauth", "jwt")
-    _LOG_KW     = ("audit", "soc", "event_log", "access_log", "syslog", "auth.log",
-                   "/var/log", "application.log", "error.log", "audit.jsonl")
+    _LOG_KW     = ("audit.log", "audit.jsonl", "audit_log", "/audit/", "_audit.",
+                   "soc", "event_log", "access_log", "syslog", "auth.log",
+                   "/var/log", "application.log", "error.log")
     _PII_KW     = ("pii", "customer", "email", "ssn", "social_security", "dob",
                    "date_of_birth", "address", "personal", "passport", "driver_license",
                    "phone", "zipcode", "users/", "user_data", "profile", "identity",

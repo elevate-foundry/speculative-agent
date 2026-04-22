@@ -5,7 +5,7 @@ MAIN = main
 TEX  = $(MAIN).tex
 BIB  = refs.bib
 
-.PHONY: pdf html both clean install-tex
+.PHONY: pdf html both clean install-tex paper-eval
 
 # ── PDF via pdflatex + bibtex (requires BasicTeX / MacTeX) ─────────────────
 pdf: $(TEX) $(BIB)
@@ -39,6 +39,12 @@ clean:
 	rm -f $(MAIN).pdf $(MAIN).html \
 	      $(MAIN).aux $(MAIN).bbl $(MAIN).blg \
 	      $(MAIN).log $(MAIN).out $(MAIN).toc
+
+# ── Run eval suite and auto-patch main.tex with live results ───────────────
+paper-eval:
+	cd .. && .venv/bin/python eval_suite.py --quiet --patch-paper
+	$(MAKE) html
+	@echo "\n✓ paper-eval complete — main.tex patched and HTML rebuilt"
 
 # ── Install BasicTeX (macOS, ~100MB) ───────────────────────────────────────
 install-tex:

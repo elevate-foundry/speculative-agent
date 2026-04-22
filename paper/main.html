@@ -966,7 +966,7 @@ class="math display">\[\begin{equation}
 class="math inline">\(\pm 1\)</span> day of each statutory limit),
 jurisdiction variants (EU country-code paths, Brazil, China, Canada,
 California), adversarial obfuscations (uppercase paths,
-<code>find -delete</code>, Python <code>os.remove</code>), and 89 benign
+<code>find -delete</code>, Python <code>os.remove</code>), and 76 benign
 false-positive traps covering typical development workflows that must
 never be blocked. Every regulation has at least five test cases.
 Ground-truth verdicts are derived from the statutory text in our
@@ -977,7 +977,7 @@ Ground-truth verdicts are derived from the statutory text in our
 negatives</strong> across 126 regulated cases. Table <a
 href="#tab:eval-extended" data-reference-type="ref"
 data-reference="tab:eval-extended">3</a> shows the per-regulation
-breakdown. All 89 benign cases are correctly permitted (zero false
+breakdown. All 76 benign cases are correctly permitted (zero false
 positives).</p>
 <div id="tab:eval-extended">
 <table>
@@ -998,20 +998,20 @@ destructive commands, and jurisdiction variants.</caption>
 <tbody>
 <tr>
 <td style="text-align: left;">Benign (FP traps)</td>
-<td style="text-align: right;">89</td>
-<td style="text-align: right;">89</td>
-<td style="text-align: right;">—</td>
-</tr>
-<tr>
-<td style="text-align: left;">SOC-II</td>
-<td style="text-align: right;">24</td>
-<td style="text-align: right;">24</td>
-<td style="text-align: right;">0</td>
+<td style="text-align: right;">76</td>
+<td style="text-align: right;">76</td>
+<td style="text-align: right;"><span>—</span></td>
 </tr>
 <tr>
 <td style="text-align: left;">HIPAA</td>
 <td style="text-align: right;">37</td>
 <td style="text-align: right;">37</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td style="text-align: left;">SOC-II</td>
+<td style="text-align: right;">24</td>
+<td style="text-align: right;">24</td>
 <td style="text-align: right;">0</td>
 </tr>
 <tr>
@@ -1073,7 +1073,7 @@ destructive commands, and jurisdiction variants.</caption>
 </div>
 <h4 id="lagrangian-distribution.">Lagrangian distribution.</h4>
 <p>Across all regulated cases: <span class="math inline">\(\mathcal{L} =
-0\)</span> for all 89 benign actions (<span
+0\)</span> for all 76 benign actions (<span
 class="math inline">\(\mathbf{Permit}\)</span>); <span
 class="math inline">\(\mathcal{L} \in [0.5, 1.0]\)</span> for
 conditional cases (GDPR, CCPA, ISO-27001 mitigations); <span

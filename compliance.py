@@ -69,13 +69,24 @@ class ConstraintResult:
     lagrangian_lambda: float = 1.0     # weight of this constraint
 
 
-def _check_soc(ctx: DataContext, action_type: str) -> ConstraintResult:
+_READ_ONLY_BASH = ("cat ", "grep ", "tail ", "head ", "less ", "more ", "wc ",
+                   "ls ", "find ", "stat ", "file ", "hexdump ", "strings ")
+
+
+def _is_bash_read_only(payload: dict) -> bool:
+    cmd = (payload.get("command") or "").lstrip()
+    return any(cmd.startswith(r) for r in _READ_ONLY_BASH)
+
+
+def _check_soc(ctx: DataContext, action_type: str, payload: dict = None) -> ConstraintResult:
     """SOC I/II/III: audit logs are immutable — writes/deletes blocked; reads permitted."""
-    if ctx.is_audit_log and action_type not in ("read_file", "noop"):
+    is_read = (action_type in ("read_file", "noop") or
+               (action_type == "bash" and _is_bash_read_only(payload or {})))
+    if ctx.is_audit_log and not is_read:
         return ConstraintResult(
             "SOC-II", Verdict.BLOCK,
             "Audit logs are immutable under SOC II CC6.1/CC7.2. Deletion of audit trail is prohibited.",
-            lagrangian_lambda=2.0,  # double weight — non-negotiable
+            lagrangian_lambda=2.0,
         )
     return ConstraintResult("SOC-II", Verdict.PERMIT,
                             "Action will be recorded in immutable audit log per SOC II CC6.1.")
@@ -129,6 +140,13 @@ def _check_hipaa(ctx: DataContext, action_type: str) -> ConstraintResult:
             "HIPAA", Verdict.BLOCK,
             f"HIPAA §164.530(j): PHI must be retained 6 years. "
             f"Record is only {ctx.created_days_ago} days old (need {min_retention}).",
+        )
+    if ctx.created_days_ago is None:
+        # Age unknown — conservatively block; operator must assert retention period
+        return ConstraintResult(
+            "HIPAA", Verdict.BLOCK,
+            "HIPAA §164.530(j): PHI retention period unknown. "
+            "Cannot confirm 6-year minimum is satisfied before deletion.",
         )
     return ConstraintResult("HIPAA", Verdict.CONDITIONAL,
                             "HIPAA: retention satisfied. Deletion must use NIST SP 800-88 media sanitization.")
@@ -225,7 +243,9 @@ def evaluate(action_type: str, payload: dict, context: DataContext) -> Complianc
     action_id = str(uuid.uuid4())
     timestamp = datetime.datetime.utcnow().isoformat() + "Z"
 
-    results = [fn(context, action_type) for fn in _CONSTRAINTS]
+    results = [fn(context, action_type) if fn != _check_soc
+               else fn(context, action_type, payload)
+               for fn in _CONSTRAINTS]
 
     # Tropical semiring (max-plus): overall score = max of weighted verdicts
     # In standard interpretation: any BLOCK = blocked, else sum of weights

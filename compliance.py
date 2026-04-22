@@ -70,10 +70,13 @@ class ConstraintResult:
 
 
 _READ_ONLY_BASH = ("cat ", "grep ", "tail ", "head ", "less ", "more ", "wc ",
-                   "ls ", "find ", "stat ", "file ", "hexdump ", "strings ")
+                   "ls ", "stat ", "file ", "hexdump ", "strings ")
 
 _DESTRUCTIVE_BASH_SIGNALS = ("-delete", "os.remove", "os.unlink", "shutil.rmtree",
                               "unlink(", "rmdir(", "> /")
+
+_READ_ACTIONS = ("read_file", "noop")
+_DESTRUCTIVE_ACTIONS = ("bash", "python_exec")
 
 
 def _is_bash_read_only(payload: dict) -> bool:
@@ -98,10 +101,12 @@ def _check_soc(ctx: DataContext, action_type: str, payload: dict = None) -> Cons
                             "Action will be recorded in immutable audit log per SOC II CC6.1.")
 
 
-def _check_gdpr(ctx: DataContext, action_type: str) -> ConstraintResult:
+def _check_gdpr(ctx: DataContext, action_type: str, payload: dict = None) -> ConstraintResult:
     """GDPR: right to erasure (Art.17) vs. lawful retention obligations (Art.5(1)(e))."""
     if not ctx.contains_pii or ctx.subject_jurisdiction not in ("EU", "UK"):
         return ConstraintResult("GDPR", Verdict.PERMIT, "GDPR not applicable (no EU/UK PII).")
+    if action_type in _READ_ACTIONS or (action_type == "bash" and _is_bash_read_only(payload or {})):
+        return ConstraintResult("GDPR", Verdict.PERMIT, "GDPR: reads not restricted.")
 
     if ctx.has_consumer_request:
         if ctx.retention_days and ctx.created_days_ago and ctx.created_days_ago < ctx.retention_days:
@@ -123,10 +128,12 @@ def _check_gdpr(ctx: DataContext, action_type: str) -> ConstraintResult:
                             "GDPR: deletion permitted but must be documented under Art.30 records.")
 
 
-def _check_ccpa(ctx: DataContext, action_type: str) -> ConstraintResult:
+def _check_ccpa(ctx: DataContext, action_type: str, payload: dict = None) -> ConstraintResult:
     """CCPA: California Consumer Privacy Act — right to delete (§1798.105)."""
     if not ctx.contains_pii or ctx.subject_jurisdiction != "CA":
         return ConstraintResult("CCPA", Verdict.PERMIT, "CCPA not applicable.")
+    if action_type in _READ_ACTIONS or (action_type == "bash" and _is_bash_read_only(payload or {})):
+        return ConstraintResult("CCPA", Verdict.PERMIT, "CCPA: reads not restricted.")
 
     if ctx.has_consumer_request:
         return ConstraintResult("CCPA", Verdict.PERMIT,
@@ -165,7 +172,9 @@ def _check_glba(ctx: DataContext, action_type: str) -> ConstraintResult:
     if ctx.data_type == "credit":
         return ConstraintResult("GLBA", Verdict.PERMIT,
                                 "GLBA defers to FCRA for consumer credit report data (lex specialis).")
-
+    if action_type == "write_file":
+        return ConstraintResult("GLBA", Verdict.CONDITIONAL,
+                                "GLBA §314.4: document retention and access controls for new financial records.")
     if not ctx.is_backed_up:
         return ConstraintResult(
             "GLBA", Verdict.BLOCK,
@@ -204,9 +213,34 @@ def _check_metro2_cdia(ctx: DataContext, action_type: str) -> ConstraintResult:
     )
 
 
-def _check_iso27001(ctx: DataContext, action_type: str) -> ConstraintResult:
-    """ISO 27001 A.8.3.2: media disposal must be documented and secure."""
-    if ctx.data_type in ("code", "log") and not ctx.contains_pii and not ctx.contains_financial:
+def _is_destructive_action(action_type: str, payload: dict = None) -> bool:
+    """True if the action_type + payload represents a data-destroying operation."""
+    if action_type in _READ_ACTIONS:
+        return False
+    if action_type == "write_file":
+        return False   # write_file creates/overwrites but is not 'disposal'
+    if action_type in _DESTRUCTIVE_ACTIONS:
+        return not _is_bash_read_only(payload or {})
+    return True
+
+
+def _check_iso27001(ctx: DataContext, action_type: str, payload: dict = None) -> ConstraintResult:
+    """ISO 27001: A.8.3.2 disposal + A.8.2.3 handling of sensitive assets."""
+    is_sensitive = ctx.contains_pii or ctx.contains_phi or ctx.contains_financial
+    # Reads never blocked
+    if action_type in _READ_ACTIONS:
+        return ConstraintResult("ISO-27001", Verdict.PERMIT, "ISO 27001: reads not restricted.")
+    if action_type == "bash" and _is_bash_read_only(payload or {}):
+        return ConstraintResult("ISO-27001", Verdict.PERMIT, "ISO 27001: read-only command.")
+    # write_file on sensitive data: A.8.2.3 handling controls required
+    if action_type == "write_file":
+        if not is_sensitive:
+            return ConstraintResult("ISO-27001", Verdict.PERMIT,
+                                    "ISO 27001: non-sensitive write, no special handling required.")
+        return ConstraintResult("ISO-27001", Verdict.CONDITIONAL,
+                                "ISO 27001 A.8.2.3: document access controls for sensitive asset.")
+    # Destructive bash/python_exec: A.8.3.2 disposal controls
+    if ctx.data_type in ("code", "log") and not is_sensitive:
         return ConstraintResult("ISO-27001", Verdict.PERMIT,
                                 "ISO 27001 A.8.3.2: non-sensitive data, standard disposal acceptable.")
     return ConstraintResult(
@@ -252,8 +286,9 @@ def evaluate(action_type: str, payload: dict, context: DataContext) -> Complianc
     action_id = str(uuid.uuid4())
     timestamp = datetime.datetime.utcnow().isoformat() + "Z"
 
-    results = [fn(context, action_type) if fn != _check_soc
-               else fn(context, action_type, payload)
+    _payload_fns = (_check_soc, _check_gdpr, _check_ccpa, _check_iso27001)
+    results = [fn(context, action_type, payload) if fn in _payload_fns
+               else fn(context, action_type)
                for fn in _CONSTRAINTS]
 
     # Tropical semiring (max-plus): overall score = max of weighted verdicts

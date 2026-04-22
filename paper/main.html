@@ -949,41 +949,44 @@ class="math inline">\(n \geq 59\)</span> (minimum publishable). For
 <span class="math inline">\(p = 0.01\)</span>, <span
 class="math inline">\(\alpha = 0.05\)</span>: <span
 class="math inline">\(n \geq 299\)</span> (strong safety claim). We
-evaluate on <span class="math inline">\(n = 191\)</span> labeled cases,
-establishing <span class="math inline">\(\text{FNR} \leq 2.8\%\)</span>
+evaluate on <span class="math inline">\(n = 215\)</span> labeled cases,
+establishing <span class="math inline">\(\text{FNR} \leq 2.3\%\)</span>
 at 95% confidence via the rule of three <span class="citation"
 data-cites="hanley1983if">(Hanley and Lippman-Hand 1983)</span>: <span
 class="math display">\[\begin{equation}
   \hat{p}_{\text{upper}} = 1 - \alpha^{1/n_{\text{reg}}} = 1 -
-0.05^{1/107} \approx 0.028
+0.05^{1/126} \approx 0.023
   \label{eq:rule-of-three}
 \end{equation}\]</span> where <span class="math inline">\(n_{\text{reg}}
-= 107\)</span> is the number of regulated (non-benign) cases.</p>
+= 126\)</span> is the number of regulated (non-benign) cases.</p>
 <h4 id="suite-design.">Suite design.</h4>
-<p>The 191 cases span all 11 regulatory frameworks, four action types
+<p>The 215 cases span all 11 regulatory frameworks, four action types
 (<code>bash</code>, <code>write_file</code>, <code>python_exec</code>,
 <code>read_file</code>), retention age boundaries (at <span
 class="math inline">\(\pm 1\)</span> day of each statutory limit),
 jurisdiction variants (EU country-code paths, Brazil, China, Canada,
 California), adversarial obfuscations (uppercase paths,
-<code>find -delete</code>, Python <code>os.remove</code>), and 84 benign
+<code>find -delete</code>, Python <code>os.remove</code>), and 89 benign
 false-positive traps covering typical development workflows that must
-never be blocked. Ground-truth verdicts are derived from the statutory
-text in our <code>regulations/</code> corpus. The full suite is
-available as <code>eval_suite.py</code> in the repository.</p>
+never be blocked. Every regulation has at least five test cases.
+Ground-truth verdicts are derived from the statutory text in our
+<code>regulations/</code> corpus. The full suite is available as
+<code>eval_suite.py</code> in the repository.</p>
 <h4 id="results.">Results.</h4>
-<p>The lattice achieves 191/191 (100%) accuracy with <strong>zero false
-negatives</strong> across 107 regulated cases. Table <a
+<p>The lattice achieves 215/215 (100%) accuracy with <strong>zero false
+negatives</strong> across 126 regulated cases. Table <a
 href="#tab:eval-extended" data-reference-type="ref"
 data-reference="tab:eval-extended">3</a> shows the per-regulation
-breakdown. All 84 benign cases are correctly permitted (zero false
+breakdown. All 89 benign cases are correctly permitted (zero false
 positives).</p>
 <div id="tab:eval-extended">
 <table>
-<caption>Extended compliance lattice evaluation (191 cases, 100%
-accuracy). Zero false negatives in 107 regulated cases: <span
-class="math inline">\(\Pr[\text{FNR} \leq 2.8\%] \geq 95\%\)</span> by
-the rule of three.</caption>
+<caption>Extended compliance lattice evaluation (215 cases, 100%
+accuracy). Zero false negatives in 126 regulated cases: <span
+class="math inline">\(\Pr[\text{FNR} \leq 2.3\%] \geq 95\%\)</span> by
+the rule of three. Every regulation has <span class="math inline">\(\geq
+5\)</span> cases; each includes reads (always permitted), writes,
+destructive commands, and jurisdiction variants.</caption>
 <thead>
 <tr>
 <th style="text-align: left;">Regulation</th>
@@ -995,8 +998,8 @@ the rule of three.</caption>
 <tbody>
 <tr>
 <td style="text-align: left;">Benign (FP traps)</td>
-<td style="text-align: right;">84</td>
-<td style="text-align: right;">84</td>
+<td style="text-align: right;">89</td>
+<td style="text-align: right;">89</td>
 <td style="text-align: right;">—</td>
 </tr>
 <tr>
@@ -1031,38 +1034,38 @@ the rule of three.</caption>
 </tr>
 <tr>
 <td style="text-align: left;">CCPA</td>
-<td style="text-align: right;">4</td>
-<td style="text-align: right;">4</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
 <td style="text-align: right;">0</td>
 </tr>
 <tr>
 <td style="text-align: left;">ISO-27001</td>
-<td style="text-align: right;">3</td>
-<td style="text-align: right;">3</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
 <td style="text-align: right;">0</td>
 </tr>
 <tr>
 <td style="text-align: left;">LGPD</td>
-<td style="text-align: right;">1</td>
-<td style="text-align: right;">1</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
 <td style="text-align: right;">0</td>
 </tr>
 <tr>
 <td style="text-align: left;">PIPEDA</td>
-<td style="text-align: right;">1</td>
-<td style="text-align: right;">1</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
 <td style="text-align: right;">0</td>
 </tr>
 <tr>
 <td style="text-align: left;">PIPL</td>
-<td style="text-align: right;">1</td>
-<td style="text-align: right;">1</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
 <td style="text-align: right;">0</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Total</strong></td>
-<td style="text-align: right;"><strong>191</strong></td>
-<td style="text-align: right;"><strong>191</strong></td>
+<td style="text-align: right;"><strong>215</strong></td>
+<td style="text-align: right;"><strong>215</strong></td>
 <td style="text-align: right;"><strong>0</strong></td>
 </tr>
 </tbody>
@@ -1070,7 +1073,7 @@ the rule of three.</caption>
 </div>
 <h4 id="lagrangian-distribution.">Lagrangian distribution.</h4>
 <p>Across all regulated cases: <span class="math inline">\(\mathcal{L} =
-0\)</span> for all 84 benign actions (<span
+0\)</span> for all 89 benign actions (<span
 class="math inline">\(\mathbf{Permit}\)</span>); <span
 class="math inline">\(\mathcal{L} \in [0.5, 1.0]\)</span> for
 conditional cases (GDPR, CCPA, ISO-27001 mitigations); <span

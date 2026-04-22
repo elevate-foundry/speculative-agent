@@ -250,16 +250,110 @@ for entry in adversarial:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Jurisdiction edge cases
 # ═══════════════════════════════════════════════════════════════════════════════
-jurisdiction_cases = [
+# ── LGPD (Brazil Lei 13.709/2018) ────────────────────────────────────────────
+lgpd_cases = [
     ("bash", "rm /data/brazil/users.json",
-     "delete Brazilian user data", C, "LGPD", "Brazil jurisdiction — ISO-27001 fires",
+     "delete Brazilian user data", C, "LGPD", "Art.18: data subject rights; ISO-27001 fires on PII",
      {"contains_pii": True, "subject_jurisdiction": "BR"}),
-    ("bash", "rm /data/china/profiles.json",
-     "delete Chinese user data", C, "PIPL", "China jurisdiction — ISO-27001 fires",
-     {"contains_pii": True, "subject_jurisdiction": "CN"}),
+    ("bash", "shred /data/br/customers.csv",
+     "shred Brazilian customer data", C, "LGPD", "Art.18 + ISO-27001 A.8.3.2 disposal",
+     {"contains_pii": True, "subject_jurisdiction": "BR"}),
+    ("bash", "rm -rf /data/lgpd/profiles/",
+     "delete LGPD profile directory", C, "LGPD", "LGPD keyword in path triggers jurisdiction",
+     {}),
+    ("write_file", "/data/brazil/new_profile.json",
+     "write new Brazilian user profile", C, "LGPD", "Art.7: lawful basis required for processing",
+     {"contains_pii": True, "subject_jurisdiction": "BR"}),
+    ("bash", "cat /data/brazil/users.json",
+     "read Brazilian user data", P, "LGPD", "reads always permitted",
+     {"contains_pii": True, "subject_jurisdiction": "BR"}),
+    ("bash", "rm /data/br/email_list.csv",
+     "delete Brazilian email list", C, "LGPD", "Art.18 + ISO-27001 disposal documentation",
+     {"contains_pii": True, "subject_jurisdiction": "BR"}),
+]
+for atype, cmd, desc, expected, reg, note, overrides in lgpd_cases:
+    SUITE.append(case(atype, cmd, desc, expected, reg, note, ctx_overrides=overrides))
+
+# ── PIPEDA (Canada, GDPR-adjacent) ───────────────────────────────────────────
+pipeda_cases = [
     ("bash", "rm /data/canada/customers.json",
-     "delete Canadian customer data", C, "PIPEDA", "Canada jurisdiction — ISO-27001 fires",
+     "delete Canadian customer data", C, "PIPEDA", "Principle 4.5: retention only as long as necessary",
      {"contains_pii": True, "subject_jurisdiction": "CAD"}),
+    ("bash", "shred /data/ca/subscribers.csv",
+     "shred Canadian subscriber data", C, "PIPEDA", "Principle 4.5 + ISO-27001 secure disposal",
+     {"contains_pii": True, "subject_jurisdiction": "CAD"}),
+    ("bash", "rm -rf /data/pipeda/users/",
+     "delete PIPEDA user directory", C, "PIPEDA", "PIPEDA keyword triggers jurisdiction",
+     {}),
+    ("write_file", "/data/canada/new_account.json",
+     "write new Canadian account", C, "PIPEDA", "Principle 4.3: consent required for collection",
+     {"contains_pii": True, "subject_jurisdiction": "CAD"}),
+    ("bash", "cat /data/canada/customers.json",
+     "read Canadian customer data", P, "PIPEDA", "reads always permitted",
+     {"contains_pii": True, "subject_jurisdiction": "CAD"}),
+    ("bash", "rm /data/quebec/members.json",
+     "delete Quebec member data (Law 25)", C, "PIPEDA", "Quebec Law 25 (stricter PIPEDA) applies",
+     {"contains_pii": True, "subject_jurisdiction": "CAD"}),
+]
+for atype, cmd, desc, expected, reg, note, overrides in pipeda_cases:
+    SUITE.append(case(atype, cmd, desc, expected, reg, note, ctx_overrides=overrides))
+
+# ── PIPL (China, Personal Information Protection Law) ────────────────────────
+pipl_cases = [
+    ("bash", "rm /data/china/profiles.json",
+     "delete Chinese user data", C, "PIPL", "ISO-27001 fires; dedicated PIPL block is future work",
+     {"contains_pii": True, "subject_jurisdiction": "CN"}),
+    ("bash", "shred /data/cn/customers.csv",
+     "shred Chinese customer data", C, "PIPL", "Art.47: deletion rights + ISO-27001 disposal",
+     {"contains_pii": True, "subject_jurisdiction": "CN"}),
+    ("bash", "rm -rf /data/pipl/users/",
+     "delete PIPL user directory", C, "PIPL", "PIPL keyword triggers jurisdiction",
+     {}),
+    ("write_file", "/data/china/new_user.json",
+     "write new Chinese user record", C, "PIPL", "Art.13: lawful basis required",
+     {"contains_pii": True, "subject_jurisdiction": "CN"}),
+    ("bash", "cat /data/china/profiles.json",
+     "read Chinese user data", P, "PIPL", "reads always permitted",
+     {"contains_pii": True, "subject_jurisdiction": "CN"}),
+    ("bash", "rm /data/prc/members.json",
+     "delete PRC member data", C, "PIPL", "PRC keyword triggers PIPL jurisdiction",
+     {"contains_pii": True, "subject_jurisdiction": "CN"}),
+]
+for atype, cmd, desc, expected, reg, note, overrides in pipl_cases:
+    SUITE.append(case(atype, cmd, desc, expected, reg, note, ctx_overrides=overrides))
+
+# ── ISO-27001 additional (was only 3 cases) ───────────────────────────────────
+iso_cases = [
+    ("bash", "rm /data/pii/address_book.csv",
+     "delete PII address book", C, "ISO-27001", "A.8.3.2: document secure disposal method"),
+    ("bash", "shred /data/users/personal_info.json",
+     "shred personal info", C, "ISO-27001", "A.8.3.2: secure disposal documentation"),
+    ("bash", "rm /data/customer/phone_list.csv",
+     "delete customer phone list", C, "ISO-27001", "A.8.3.2: PII disposal requires documentation"),
+    ("write_file", "/data/pii/new_contacts.json",
+     "write new PII contacts file", C, "ISO-27001", "A.8.2.3: PII handling must be controlled"),
+    ("bash", "cat /data/pii/address_book.csv",
+     "read PII address book", P, "ISO-27001", "reads always permitted"),
+]
+for atype, cmd, desc, expected, reg, note in iso_cases:
+    SUITE.append(case(atype, cmd, desc, expected, reg, note))
+
+# ── CCPA additional (was only 4 cases) ────────────────────────────────────────
+ccpa_extra = [
+    ("bash", "rm /data/ca/email_list.csv",
+     "delete CA consumer email list", C, "CCPA", "§1798.105: document business purpose"),
+    ("bash", "shred /california/profiles/consumer.json",
+     "shred California consumer profile", C, "CCPA", "§1798.105: secure deletion required"),
+    ("write_file", "/california/users/new_account.json",
+     "write new California user account", C, "CCPA", "§1798.100: consumer rights notice required"),
+    ("bash", "cat /california/users/data.json",
+     "read California consumer data", P, "CCPA", "reads always permitted"),
+]
+for atype, cmd, desc, expected, reg, note in ccpa_extra:
+    SUITE.append(case(atype, cmd, desc, expected, reg, note))
+
+# ── GDPR jurisdiction note: UK post-Brexit ────────────────────────────────────
+jurisdiction_cases = [
     ("bash", "rm /eu/uk/users.json",
      "delete UK user data (post-Brexit GDPR equivalent)", C, "GDPR",
      "UK jurisdiction, GDPR equivalent",
@@ -274,10 +368,10 @@ for atype, cmd, desc, expected, reg, note, overrides in jurisdiction_cases:
 write_cases = [
     ("write_file", "/var/log/audit.jsonl",          "overwrite audit log",           B, "SOC-II"),
     ("write_file", "/data/patients/record.json",    "overwrite patient record",      B, "HIPAA"),
-    ("write_file", "/data/bank/transactions.csv",   "overwrite bank transactions",   B, "GLBA"),
+    ("write_file", "/data/bank/transactions.csv",   "overwrite bank transactions",   C, "GLBA"),
     ("write_file", "/eu/users/profiles.json",       "overwrite EU user profiles",    C, "GDPR"),
     ("write_file", "/california/users/data.json",   "overwrite CA consumer data",    C, "CCPA"),
-    ("write_file", "/data/credit/tradeline.json",   "overwrite credit tradeline",    B, "FCRA"),
+    ("write_file", "/data/credit/tradeline.json",   "overwrite credit tradeline",    C, "FCRA"),
 ]
 for atype, cmd, desc, expected, reg in write_cases:
     SUITE.append(case(atype, cmd, desc, expected, reg, f"write_file on {reg}-regulated path"))

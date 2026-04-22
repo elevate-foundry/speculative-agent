@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Compliance Lattice Visualizer — Speculative Agent</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <style>
+    :root {
+      --bg:     #0f0f1a;
+      --panel:  #1a1a2e;
+      --border: #2a2a4a;
+      --gold:   #e2b96f;
+      --permit: #2d9a6b;
+      --cond:   #e07b39;
+      --block:  #c1121f;
+      --muted:  #8888aa;
+      --text:   #e8e8f0;
+      --mono:   'SF Mono','Fira Code',monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: Georgia, serif;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      grid-template-rows: 52px 1fr;
+    }
+    header {
+      grid-column: 1/-1;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    header h1 { font-size: 1rem; color: var(--gold); }
+    header .sub { font-size: 0.75rem; color: var(--muted); font-family: var(--mono); margin-left: 0.5rem; }
+    header a { margin-left: auto; color: var(--muted); font-size: 0.75rem; font-family: var(--mono); text-decoration: none; }
+    header a:hover { color: var(--gold); }
+
+    #controls {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 1.2rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+    }
+    .sec { font-size: 0.65rem; font-family: var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .4rem; }
+
+    select {
+      width: 100%;
+      background: #12121f;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 5px;
+      padding: .35rem .5rem;
+      font-size: .8rem;
+      font-family: var(--mono);
+    }
+    label.tog {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: .78rem; cursor: pointer;
+      padding: .25rem .4rem; border-radius: 4px;
+    }
+    label.tog:hover { background: rgba(255,255,255,.04); }
+    label.tog input { display: none; }
+    .pill {
+      width: 32px; height: 16px; border-radius: 8px;
+      background: #333355; position: relative; transition: background .2s; flex-shrink: 0;
+    }
+    .pill::after {
+      content: ''; position: absolute;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #666688; top: 3px; left: 3px;
+      transition: transform .2s, background .2s;
+    }
+    input:checked + .pill { background: var(--permit); }
+    input:checked + .pill::after { transform: translateX(16px); background: #fff; }
+
+    .range-row { display: flex; align-items: center; gap: .5rem; }
+    .range-row input[type=range] { flex: 1; accent-color: var(--gold); cursor: pointer; }
+    .range-val { font-size: .75rem; font-family: var(--mono); color: var(--gold); min-width: 4ch; text-align: right; }
+
+    #lbox {
+      background: #12121f; border: 1px solid var(--border);
+      border-radius: 8px; padding: .8rem; text-align: center;
+    }
+    #lbox .ll { font-size: .65rem; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+    #lval { font-size: 2.2rem; font-weight: 700; font-family: var(--mono); line-height: 1.1; transition: color .3s; }
+    #lverdict { font-size: .78rem; font-family: var(--mono); margin-top: .2rem; }
+
+    #bcell {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+      padding: 8px; background: #12121f;
+      border: 1px solid var(--border); border-radius: 8px;
+      width: 64px; margin: 0 auto;
+    }
+    .bdot {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #2a2a4a; transition: background .25s, box-shadow .25s;
+    }
+    .bdot.raised { background: var(--block); box-shadow: 0 0 7px rgba(193,18,31,.7); }
+    .bdot.permit-lit { background: var(--permit); box-shadow: 0 0 7px rgba(45,154,107,.7); }
+
+    #reg-list { display: flex; flex-direction: column; gap: 3px; }
+    .rrow {
+      display: flex; align-items: center; gap: .4rem;
+      font-size: .74rem; font-family: var(--mono);
+      padding: .22rem .4rem; border-radius: 4px;
+    }
+    .rrow:hover { background: rgba(255,255,255,.04); }
+    .rdot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; transition: background .25s; }
+    .rname { flex: 1; }
+    .rv {
+      font-size: .67rem; padding: 1px 5px; border-radius: 3px; font-weight: 700;
+    }
+    .rv.PERMIT     { background: rgba(45,154,107,.18); color: var(--permit); }
+    .rv.CONDITIONAL{ background: rgba(224,123,57,.18); color: var(--cond); }
+    .rv.BLOCK      { background: rgba(193,18,31,.18);  color: var(--block); }
+
+    #graph { overflow: hidden; }
+    svg { width: 100%; height: 100%; }
+
+    .node circle { stroke-width: 2; cursor: pointer; transition: stroke .2s; }
+    .node circle:hover { stroke-width: 3.5; }
+    .node text { font-family: var(--mono); font-size: 10px; fill: var(--text); pointer-events: none; text-anchor: middle; }
+    .node .lam { font-size: 8px; fill: var(--muted); }
+    .link { stroke-width: 1.5; fill: none; }
+    .link.dominant { stroke-width: 3; stroke-dasharray: 6 3; animation: dash 1s linear infinite; }
+    @keyframes dash { to { stroke-dashoffset: -18; } }
+
+    #tt {
+      position: fixed; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: .6rem .9rem;
+      font-size: .74rem; font-family: var(--mono);
+      pointer-events: none; opacity: 0; transition: opacity .15s;
+      max-width: 240px; line-height: 1.5; z-index: 100;
+    }
+    #tt .ttt { color: var(--gold); font-weight: 700; margin-bottom: .2rem; }
+    #tt .ttr { color: var(--muted); font-size: .68rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⠿ Compliance Lattice</h1>
+  <span class="sub">ℒ = max<sub>i</sub> λᵢ · vᵢ(a, d)</span>
+  <a href="paper/main.html">← Paper</a>
+</header>
+
+<div id="controls">
+
+  <div>
+    <div class="sec">Action Type</div>
+    <select id="act">
+      <option value="bash_destruct">bash — destructive (rm, dd…)</option>
+      <option value="bash_read">bash — read-only (cat, grep…)</option>
+      <option value="read_file">read_file</option>
+      <option value="write_file">write_file</option>
+      <option value="python_exec">python_exec</option>
+    </select>
+  </div>
+
+  <div>
+    <div class="sec">Data Context</div>
+    <label class="tog">PII present        <input type="checkbox" id="pii">  <span class="pill"></span></label>
+    <label class="tog">PHI — HIPAA        <input type="checkbox" id="phi">  <span class="pill"></span></label>
+    <label class="tog">Financial data     <input type="checkbox" id="fin">  <span class="pill"></span></label>
+    <label class="tog">Audit log path     <input type="checkbox" id="audit"><span class="pill"></span></label>
+    <label class="tog">Consumer del. req. <input type="checkbox" id="req">  <span class="pill"></span></label>
+    <label class="tog">Backed up          <input type="checkbox" id="bkup"> <span class="pill"></span></label>
+  </div>
+
+  <div>
+    <div class="sec">Jurisdiction</div>
+    <select id="jur">
+      <option value="US">US</option>
+      <option value="EU">EU / UK (GDPR)</option>
+      <option value="CA">California (CCPA)</option>
+      <option value="CN">China (PIPL)</option>
+      <option value="BR">Brazil (LGPD)</option>
+    </select>
+  </div>
+
+  <div>
+    <div class="sec">Record Age</div>
+    <div class="range-row">
+      <input type="range" id="age" min="0" max="3000" step="10" value="0">
+      <span class="range-val" id="agev">0 d</span>
+    </div>
+    <div style="font-size:.67rem;color:var(--muted);font-family:var(--mono);margin-top:.3rem">
+      HIPAA threshold: 2190 d &nbsp;·&nbsp; FCRA: 2555 d
+    </div>
+  </div>
+
+  <div id="lbox">
+    <div class="ll">Lagrangian ℒ (tropical max)</div>
+    <div id="lval">0.00</div>
+    <div id="lverdict">✓ PERMIT</div>
+  </div>
+
+  <div>
+    <div class="sec">8-dot Braille compliance state</div>
+    <div id="bcell">
+      <!-- col1: dots 1,2,3,7  col2: dots 4,5,6,8 -->
+      <div class="bdot" id="b1" title="dot 1 — SOC-II"></div>
+      <div class="bdot" id="b4" title="dot 4 — CCPA"></div>
+      <div class="bdot" id="b2" title="dot 2 — GDPR"></div>
+      <div class="bdot" id="b5" title="dot 5 — FCRA"></div>
+      <div class="bdot" id="b3" title="dot 3 — HIPAA"></div>
+      <div class="bdot" id="b6" title="dot 6 — GLBA"></div>
+      <div class="bdot" id="b7" title="dot 7 — PIPL"></div>
+      <div class="bdot" id="b8" title="dot 8 — ISO-27001"></div>
+    </div>
+    <div style="text-align:center;font-size:.65rem;color:var(--muted);font-family:var(--mono);margin-top:.35rem">
+      raised (red) = violation &nbsp;·&nbsp; lit (green) = permit
+    </div>
+  </div>
+
+  <div>
+    <div class="sec">Per-regulation results</div>
+    <div id="reg-list"></div>
+  </div>
+
+</div>
+
+<div id="graph"></div>
+<div id="tt"></div>
+
+<script>
+// ── Lattice definition ────────────────────────────────────────────────────────
+
+const NODES = [
+  { id:"SOC-II",    label:"SOC II",    lambda:2, dot:1,    desc:"CC6.1: audit log immutability. Blocks any write/delete to audit trail." },
+  { id:"GDPR",      label:"GDPR",      lambda:1, dot:2,    desc:"Art.17 right to erasure vs Art.5(1)(e) storage limitation. EU/UK only." },
+  { id:"CCPA",      label:"CCPA",      lambda:1, dot:4,    desc:"§1798.105 right to delete. California jurisdiction only." },
+  { id:"HIPAA",     label:"HIPAA",     lambda:1, dot:3,    desc:"§164.530(j): 6-year PHI retention minimum. Blocks deletion of young records." },
+  { id:"GLBA",      label:"GLBA",      lambda:1, dot:6,    desc:"§314.4(f): customer financial records must be backed up before destruction." },
+  { id:"FCRA",      label:"FCRA",      lambda:1, dot:5,    desc:"§605: consumer report data must be retained 7 years." },
+  { id:"Metro-II",  label:"Metro II",  lambda:1, dot:null, desc:"e-OSCAR: CRA notification required within 30 days of tradeline deletion." },
+  { id:"PIPL",      label:"PIPL",      lambda:1, dot:7,    desc:"Art.38: cross-border transfer of CN personal data blocked without CAC approval." },
+  { id:"ISO-27001", label:"ISO 27001", lambda:1, dot:8,    desc:"A.8.3.2: secure disposal required for sensitive assets. Document method." },
+];
+
+// Hasse diagram edges (parent -> child in the partial order)
+const EDGES = [
+  { s:"SOC-II",   t:"GLBA"      },
+  { s:"SOC-II",   t:"HIPAA"     },
+  { s:"SOC-II",   t:"GDPR"      },
+  { s:"GDPR",     t:"CCPA"      },
+  { s:"GLBA",     t:"FCRA"      },
+  { s:"FCRA",     t:"Metro-II"  },
+  { s:"HIPAA",    t:"ISO-27001" },
+  { s:"CCPA",     t:"ISO-27001" },
+  { s:"Metro-II", t:"ISO-27001" },
+  { s:"PIPL",     t:"ISO-27001" },
+];
+
+// Fixed hierarchical y-positions (top = most authoritative)
+const LEVELS = {
+  "SOC-II":    0,
+  "GDPR":      1, "GLBA":  1, "HIPAA": 1,
+  "CCPA":      2, "FCRA":  2,
+  "Metro-II":  3, "PIPL":  3,
+  "ISO-27001": 4,
+};
+
+// ── Compliance evaluator (mirrors compliance.py logic) ───────────────────────
+
+function evaluate(ctx) {
+  const { action, pii, phi, fin, audit, req, bkup, jur, age } = ctx;
+  const isRead = action === "read_file" || action === "bash_read";
+  const isWrite = action === "write_file";
+  const isDestruct = action === "bash_destruct" || action === "python_exec";
+
+  const results = {};
+
+  // SOC-II
+  if (audit && !isRead) {
+    results["SOC-II"] = { v:"BLOCK", w:2.0, note:"Audit log immutable — write/delete blocked (CC6.1)" };
+  } else {
+    results["SOC-II"] = { v:"PERMIT", w:0, note:"Action recorded in immutable audit log" };
+  }
+
+  // GDPR
+  if (!pii || (jur !== "EU" && jur !== "UK")) {
+    results["GDPR"] = { v:"PERMIT", w:0, note:"GDPR not applicable (no EU/UK PII)" };
+  } else if (isRead) {
+    results["GDPR"] = { v:"PERMIT", w:0, note:"Reads not restricted under GDPR" };
+  } else if (req) {
+    results["GDPR"] = { v:"PERMIT", w:0, note:"Art.17: valid erasure request — deletion required" };
+  } else {
+    results["GDPR"] = { v:"CONDITIONAL", w:0.5, note:"Art.30: deletion must be documented" };
+  }
+
+  // CCPA
+  if (!pii || jur !== "CA") {
+    results["CCPA"] = { v:"PERMIT", w:0, note:"CCPA not applicable" };
+  } else if (isRead) {
+    results["CCPA"] = { v:"PERMIT", w:0, note:"Reads not restricted under CCPA" };
+  } else if (req) {
+    results["CCPA"] = { v:"PERMIT", w:0, note:"§1798.105: consumer deletion request — required" };
+  } else {
+    results["CCPA"] = { v:"CONDITIONAL", w:0.5, note:"Document business purpose under §1798.100" };
+  }
+
+  // HIPAA
+  if (!phi) {
+    results["HIPAA"] = { v:"PERMIT", w:0, note:"HIPAA not applicable (no PHI)" };
+  } else if (isRead) {
+    results["HIPAA"] = { v:"PERMIT", w:0, note:"Read access to PHI permitted" };
+  } else if (age !== null && age < 2190) {
+    results["HIPAA"] = { v:"BLOCK", w:1.0, note:`§164.530(j): PHI must be retained 6 years (${age}d < 2190d)` };
+  } else if (age === null) {
+    results["HIPAA"] = { v:"BLOCK", w:1.0, note:"§164.530(j): age unknown — cannot confirm 6yr retention" };
+  } else {
+    results["HIPAA"] = { v:"CONDITIONAL", w:0.5, note:"Retention satisfied; use NIST SP 800-88 disposal" };
+  }
+
+  // GLBA
+  if (!fin) {
+    results["GLBA"] = { v:"PERMIT", w:0, note:"GLBA not applicable (no financial data)" };
+  } else if (isWrite) {
+    results["GLBA"] = { v:"CONDITIONAL", w:0.5, note:"§314.4: document retention and access controls" };
+  } else if (!bkup && isDestruct) {
+    results["GLBA"] = { v:"BLOCK", w:1.0, note:"§314.4(f): backup required before destruction" };
+  } else if (isRead) {
+    results["GLBA"] = { v:"PERMIT", w:0, note:"Reads not restricted under GLBA" };
+  } else {
+    results["GLBA"] = { v:"CONDITIONAL", w:0.5, note:"Document secure destruction method" };
+  }
+
+  // FCRA
+  if (!fin) {
+    results["FCRA"] = { v:"PERMIT", w:0, note:"FCRA not applicable" };
+  } else if (isRead) {
+    results["FCRA"] = { v:"PERMIT", w:0, note:"Reads not restricted under FCRA" };
+  } else if (age !== null && age < 2555) {
+    results["FCRA"] = { v:"BLOCK", w:1.0, note:`§605: 7-year retention required (${age}d < 2555d)` };
+  } else {
+    results["FCRA"] = { v:"PERMIT", w:0, note:"FCRA: 7-year retention satisfied" };
+  }
+
+  // Metro-II
+  if (!fin) {
+    results["Metro-II"] = { v:"PERMIT", w:0, note:"Metro II/CDIA not applicable" };
+  } else {
+    results["Metro-II"] = { v:"CONDITIONAL", w:0.5, note:"e-OSCAR: notify all CRAs within 30 days" };
+  }
+
+  // PIPL
+  if (jur !== "CN" || !pii) {
+    results["PIPL"] = { v:"PERMIT", w:0, note:"PIPL not applicable" };
+  } else if (isRead) {
+    results["PIPL"] = { v:"PERMIT", w:0, note:"Read access permitted under PIPL" };
+  } else {
+    results["PIPL"] = { v:"BLOCK", w:1.0, note:"Art.38: CAC approval required for cross-border transfer" };
+  }
+
+  // ISO-27001
+  const sensitive = pii || phi || fin;
+  if (isRead) {
+    results["ISO-27001"] = { v:"PERMIT", w:0, note:"ISO 27001: reads not restricted" };
+  } else if (isWrite && !sensitive) {
+    results["ISO-27001"] = { v:"PERMIT", w:0, note:"Non-sensitive write — no special handling required" };
+  } else if (isWrite && sensitive) {
+    results["ISO-27001"] = { v:"CONDITIONAL", w:0.5, note:"A.8.2.3: document access controls for sensitive asset" };
+  } else if (!sensitive) {
+    results["ISO-27001"] = { v:"PERMIT", w:0, note:"A.8.3.2: non-sensitive — standard disposal acceptable" };
+  } else {
+    results["ISO-27001"] = { v:"CONDITIONAL", w:0.5, note:"A.8.3.2: secure disposal required — document method" };
+  }
+
+  // Tropical max
+  const lagrangian = Math.max(...Object.values(results).map(r => r.w));
+  const blocked = Object.entries(results).filter(([,r]) => r.v === "BLOCK").map(([k]) => k);
+  const permitted = blocked.length === 0;
+
+  // Dominant node (argmax)
+  const dominant = Object.entries(results).reduce((best, [k,r]) =>
+    r.w > (best ? results[best].w : -1) ? k : best, null);
+
+  return { results, lagrangian, permitted, blocked, dominant };
+}
+
+// ── D3 graph ─────────────────────────────────────────────────────────────────
+
+const COLOR = { PERMIT: "#2d9a6b", CONDITIONAL: "#e07b39", BLOCK: "#c1121f" };
+const STROKE = { PERMIT: "#1e6b49", CONDITIONAL: "#9e5425", BLOCK: "#8a0d15" };
+
+const graphEl = document.getElementById("graph");
+const W = () => graphEl.clientWidth;
+const H = () => graphEl.clientHeight;
+
+const svg = d3.select("#graph").append("svg");
+
+// Arrow marker
+const defs = svg.append("defs");
+defs.append("marker")
+  .attr("id","arrow").attr("viewBox","0 -5 10 10")
+  .attr("refX",18).attr("refY",0)
+  .attr("markerWidth",6).attr("markerHeight",6)
+  .attr("orient","auto")
+  .append("path").attr("d","M0,-5L10,0L0,5").attr("fill","#3a3a6a");
+
+const linkLayer = svg.append("g").attr("class","links");
+const nodeLayer = svg.append("g").attr("class","nodes");
+
+// Position nodes in a layered layout
+function layoutNodes() {
+  const w = W(), h = H();
+  const maxLevel = 4;
+  const levelNodes = {};
+  NODES.forEach(n => {
+    const lv = LEVELS[n.id];
+    if (!levelNodes[lv]) levelNodes[lv] = [];
+    levelNodes[lv].push(n);
+  });
+  NODES.forEach(n => {
+    const lv = LEVELS[n.id];
+    const peers = levelNodes[lv];
+    const idx = peers.indexOf(n);
+    n.x = (w / (peers.length + 1)) * (idx + 1);
+    n.y = 60 + (lv / maxLevel) * (h - 120);
+  });
+}
+
+function nodeById(id) { return NODES.find(n => n.id === id); }
+
+let linkSel, nodeSel, circSel, labelSel;
+
+function buildGraph() {
+  layoutNodes();
+
+  linkSel = linkLayer.selectAll(".link").data(EDGES)
+    .join("line")
+    .attr("class","link")
+    .attr("stroke","#2a2a4a")
+    .attr("stroke-width",1.5)
+    .attr("marker-end","url(#arrow)")
+    .attr("x1", d => nodeById(d.s).x)
+    .attr("y1", d => nodeById(d.s).y + 18)
+    .attr("x2", d => nodeById(d.t).x)
+    .attr("y2", d => nodeById(d.t).y - 18);
+
+  nodeSel = nodeLayer.selectAll(".node").data(NODES)
+    .join("g").attr("class","node")
+    .attr("transform", d => `translate(${d.x},${d.y})`)
+    .on("mouseover", showTip)
+    .on("mousemove", moveTip)
+    .on("mouseout", hideTip);
+
+  circSel = nodeSel.append("circle")
+    .attr("r", d => d.lambda > 1 ? 22 : 18)
+    .attr("fill","#2a2a4a").attr("stroke","#444466");
+
+  nodeSel.append("text").attr("dy","0.35em").attr("y",-1)
+    .text(d => d.label)
+    .attr("class","label-text");
+
+  nodeSel.append("text").attr("dy","0.35em").attr("y",10)
+    .text(d => d.lambda > 1 ? `λ=${d.lambda}` : "")
+    .attr("class","lam");
+}
+
+function updateGraph(evalResult) {
+  const { results, dominant } = evalResult;
+
+  circSel.transition().duration(220)
+    .attr("fill", d => COLOR[results[d.id].v])
+    .attr("stroke", d => STROKE[results[d.id].v]);
+
+  linkSel.transition().duration(220)
+    .attr("stroke", d => {
+      if (d.s === dominant || d.t === dominant) return "#e2b96f";
+      return "#2a2a4a";
+    })
+    .attr("stroke-width", d => (d.s === dominant || d.t === dominant) ? 2.5 : 1.5)
+    .attr("stroke-dasharray", d => (d.s === dominant || d.t === dominant) ? "6 3" : "none");
+}
+
+// tooltip
+const tt = document.getElementById("tt");
+function showTip(event, d) {
+  const r = currentEval ? currentEval.results[d.id] : null;
+  tt.innerHTML = `<div class="ttt">${d.label} (λ=${d.lambda})</div>
+    <div class="ttr">${d.desc}</div>
+    ${r ? `<div style="margin-top:.3rem;color:${COLOR[r.v]};font-weight:700">${r.v} — ${r.note}</div>` : ""}`;
+  tt.style.opacity = 1;
+}
+function moveTip(event) {
+  tt.style.left = (event.clientX + 14) + "px";
+  tt.style.top  = (event.clientY - 10) + "px";
+}
+function hideTip() { tt.style.opacity = 0; }
+
+// ── UI updater ────────────────────────────────────────────────────────────────
+
+let currentEval = null;
+
+function getCtx() {
+  return {
+    action: document.getElementById("act").value,
+    pii:   document.getElementById("pii").checked,
+    phi:   document.getElementById("phi").checked,
+    fin:   document.getElementById("fin").checked,
+    audit: document.getElementById("audit").checked,
+    req:   document.getElementById("req").checked,
+    bkup:  document.getElementById("bkup").checked,
+    jur:   document.getElementById("jur").value,
+    age:   parseInt(document.getElementById("age").value),
+  };
+}
+
+const DOT_MAP = { "SOC-II":"b1","GDPR":"b2","HIPAA":"b3","CCPA":"b4","FCRA":"b5","GLBA":"b6","PIPL":"b7","ISO-27001":"b8" };
+
+function refresh() {
+  const ctx = getCtx();
+  const ev = evaluate(ctx);
+  currentEval = ev;
+
+  // Lagrangian display
+  const lval = document.getElementById("lval");
+  const lverdict = document.getElementById("lverdict");
+  lval.textContent = ev.lagrangian.toFixed(2);
+  lval.style.color = ev.permitted
+    ? (ev.lagrangian > 0 ? "#e07b39" : "#2d9a6b")
+    : "#c1121f";
+  lverdict.textContent = ev.permitted
+    ? (ev.lagrangian > 0 ? "◑ CONDITIONAL" : "✓ PERMIT")
+    : `✗ BLOCK — ${ev.blocked.join(", ")}`;
+  lverdict.style.color = ev.permitted
+    ? (ev.lagrangian > 0 ? "#e07b39" : "#2d9a6b")
+    : "#c1121f";
+
+  // Braille cell
+  Object.entries(DOT_MAP).forEach(([reg, dotId]) => {
+    const el = document.getElementById(dotId);
+    const v = ev.results[reg]?.v;
+    el.className = "bdot";
+    if (v === "BLOCK") el.classList.add("raised");
+    else if (v === "PERMIT") el.classList.add("permit-lit");
+  });
+
+  // Reg list
+  const list = document.getElementById("reg-list");
+  list.innerHTML = NODES.map(n => {
+    const r = ev.results[n.id];
+    return `<div class="rrow">
+      <div class="rdot" style="background:${COLOR[r.v]}"></div>
+      <div class="rname">${n.label}</div>
+      <div class="rv ${r.v}">${r.v}</div>
+    </div>`;
+  }).join("");
+
+  // Graph
+  updateGraph(ev);
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+buildGraph();
+refresh();
+
+// Wire all inputs
+["act","jur"].forEach(id => document.getElementById(id).addEventListener("change", refresh));
+["pii","phi","fin","audit","req","bkup"].forEach(id =>
+  document.getElementById(id).addEventListener("change", refresh));
+const ageSlider = document.getElementById("age");
+const ageVal    = document.getElementById("agev");
+ageSlider.addEventListener("input", () => {
+  ageVal.textContent = ageSlider.value + " d";
+  refresh();
+});
+
+// Relayout on resize
+window.addEventListener("resize", () => {
+  layoutNodes();
+  linkSel.attr("x1",d=>nodeById(d.s).x).attr("y1",d=>nodeById(d.s).y+18)
+         .attr("x2",d=>nodeById(d.t).x).attr("y2",d=>nodeById(d.t).y-18);
+  nodeSel.attr("transform",d=>`translate(${d.x},${d.y})`);
+});
+</script>
+</body>
+</html>

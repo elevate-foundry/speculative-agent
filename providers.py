@@ -33,6 +33,7 @@ class ProviderConfig:
     auth_header: str = "Authorization"
     auth_prefix: str = "Bearer"
     extra_headers: dict[str, str] = field(default_factory=dict)
+    use_messages_api: bool = False  # True = Anthropic native /v1/messages SSE format
 
 
 PROVIDER_REGISTRY: list[ProviderConfig] = [
@@ -50,12 +51,13 @@ PROVIDER_REGISTRY: list[ProviderConfig] = [
         base_url="https://api.anthropic.com/v1",
         api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         models={
-            "standard":    ["claude-haiku-3-5-20241022"],
-            "performance": ["claude-sonnet-4-20250514"],
+            "standard":    ["claude-haiku-4-5-20251001"],
+            "performance": ["claude-opus-4-7", "claude-sonnet-4-6"],
         },
         auth_header="x-api-key",
         auth_prefix="",
         extra_headers={"anthropic-version": "2023-06-01"},
+        use_messages_api=True,
     ),
     ProviderConfig(
         name="google",

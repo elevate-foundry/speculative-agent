@@ -230,12 +230,69 @@ async def _stream_direct(
     provider_config: object,
     screenshot_b64: Optional[str] = None,
 ) -> None:
-    """Stream from a direct provider API (OpenAI-compatible chat/completions)."""
+    """Stream from a direct provider API. Supports both OpenAI-compat and native Anthropic /v1/messages."""
     import httpx
     import json as _json
 
     prov = provider_config  # type: ignore
+    auth_value = f"{prov.auth_prefix} {prov.api_key}".strip() if prov.auth_prefix else prov.api_key
+    headers = {prov.auth_header: auth_value, **prov.extra_headers}
 
+    # ── Anthropic native /v1/messages SSE ──────────────────────────────────
+    if getattr(prov, "use_messages_api", False):
+        if screenshot_b64:
+            user_content = [
+                {"type": "text", "text": prompt},
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": "image/png",
+                    "data": screenshot_b64,
+                }},
+            ]
+        else:
+            user_content = prompt
+
+        payload = {
+            "model": model_name,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_content}],
+            "stream": True,
+            "max_tokens": 1024,
+        }
+        async with httpx.AsyncClient(timeout=120) as client:
+            async with client.stream(
+                "POST", f"{prov.base_url}/messages",
+                json=payload, headers=headers
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if cancel_event.is_set():
+                        stream_obj.cancelled = True
+                        return
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:].strip()
+                    if not data:
+                        continue
+                    try:
+                        chunk = _json.loads(data)
+                    except _json.JSONDecodeError:
+                        continue
+                    etype = chunk.get("type", "")
+                    if etype == "content_block_delta":
+                        token = chunk.get("delta", {}).get("text", "")
+                        if token:
+                            stream_obj.tokens.append(token)
+                    elif etype == "message_stop":
+                        stream_obj.done = True
+                        return
+                    elif etype == "message_delta":
+                        reason = chunk.get("delta", {}).get("stop_reason")
+                        if reason:
+                            stream_obj.done = True
+                            return
+        return
+
+    # ── OpenAI-compatible /chat/completions SSE ────────────────────────────
     if screenshot_b64:
         user_content = [
             {"type": "text", "text": prompt},
@@ -253,12 +310,9 @@ async def _stream_direct(
             {"role": "user",   "content": user_content},
         ],
         "stream": True,
-        "max_tokens": 512,
+        "max_tokens": 1024,
         "temperature": 0.3,
     }
-
-    auth_value = f"{prov.auth_prefix} {prov.api_key}".strip() if prov.auth_prefix else prov.api_key
-    headers = {prov.auth_header: auth_value, **prov.extra_headers}
 
     async with httpx.AsyncClient(timeout=120) as client:
         async with client.stream(

@@ -28,7 +28,12 @@ if os.path.exists(_env_path):
 os.environ.setdefault("AGENT_BUDGET", "performance")
 
 sys.path.insert(0, os.path.dirname(__file__))
-from compliance import evaluate, infer_context, DataContext, AUDIT_LOG_PATH
+from compliance import (
+    evaluate, infer_context, DataContext, AUDIT_LOG_PATH,
+    encode_braille_word, decode_braille_word, encode_braille_binary,
+    braille_word_to_bits, braille_meet, braille_join, braille_hamming,
+    braille_drift, evaluate_filtration, Verdict, REGULATION_ORDER,
+)
 
 PORT = 8420
 
@@ -259,6 +264,19 @@ function renderDecision(d) {
     html+=`</div>`;
   }
 
+  if(d.braille){
+    html+=`<h2 style="margin-top:1.2rem">Braille Encoding</h2>
+    <div style="display:flex;align-items:center;gap:1.5rem;padding:.6rem;background:var(--surface);border:1px solid var(--border);border-radius:4px">
+      <div style="font-size:2.5rem;letter-spacing:.3em;font-family:inherit">${d.braille.word||'\u2800\u2800'}</div>
+      <div style="font-size:.75rem;color:var(--muted);line-height:1.8">
+        <div>Ternary word: <b style="color:var(--text)">${d.braille.word||'\u2800\u2800'}</b> (${d.braille.cells||2}-cell, ${d.braille.bits_required||15}b \u2192 ${d.braille.bits_available||16}b)</div>
+        <div>Binary cell: <b style="color:var(--text)">${d.braille.binary||'\u2800'}</b> (8-dot, permit/block)</div>
+        <div>Bits: <code>${d.braille.bits||'00000000 00000000'}</code></div>
+        <div>State integer: <code>${d.braille.state_int||0}</code> &nbsp; F=${d.braille.framework_count||9} S=${d.braille.states_per_framework||3}</div>
+      </div>
+    </div>`;
+  }
+
   html+=`<h2 style="margin-top:1.2rem">Constraint Results (${d.constraints.length} nodes)</h2>
   <table class="constraint-table">
   <thead><tr><th>Regulation</th><th>Verdict</th><th>Rationale</th></tr></thead><tbody>`;
@@ -368,9 +386,86 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
-        if self.path != "/evaluate":
+        parsed = urlparse(self.path)
+        if parsed.path == "/evaluate":
+            return self._handle_evaluate()
+        elif parsed.path == "/filtration":
+            return self._handle_filtration()
+        elif parsed.path == "/bridge":
+            return self._handle_bridge()
+        else:
             self.send_error(404)
             return
+
+    def _handle_bridge(self):
+        """POST /bridge — compare/merge two or more Braille words."""
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        try:
+            req = json.loads(raw)
+        except Exception as e:
+            self._send_json({"error": f"Invalid JSON: {e}"}, 400)
+            return
+
+        words = req.get("words")
+        if not words or not isinstance(words, list) or len(words) < 2:
+            self._send_json({"error": "'words' must be a list of 2+ Braille word strings"}, 400)
+            return
+
+        F = req.get("framework_count", 9)
+        S = req.get("states", 3)
+
+        try:
+            # Decode all words back to verdict vectors
+            decoded = {}
+            for i, w in enumerate(words):
+                verdicts = decode_braille_word(w, F, S)
+                decoded[f"word_{i}"] = {
+                    "word": w,
+                    "verdicts": [v.name for v in verdicts],
+                    "bits": braille_word_to_bits(w),
+                }
+
+            # Pairwise distances
+            pairwise = []
+            for i in range(len(words)):
+                for j in range(i + 1, len(words)):
+                    h = braille_hamming(words[i], words[j], F, S)
+                    d = braille_drift(words[i], words[j], F, S)
+                    pairwise.append({
+                        "a": i, "b": j,
+                        "hamming": h, "drift": round(d, 4),
+                    })
+
+            # Global meet and join
+            meet_w = words[0]
+            join_w = words[0]
+            for w in words[1:]:
+                meet_w = braille_meet(meet_w, w, F, S)
+                join_w = braille_join(join_w, w, F, S)
+
+            consensus = len(set(words)) == 1
+
+            self._send_json({
+                "words": decoded,
+                "pairwise": pairwise,
+                "meet": {
+                    "word": meet_w,
+                    "verdicts": [v.name for v in decode_braille_word(meet_w, F, S)],
+                    "description": "conservative merge (strictest per framework)",
+                },
+                "join": {
+                    "word": join_w,
+                    "verdicts": [v.name for v in decode_braille_word(join_w, F, S)],
+                    "description": "permissive merge (most lenient per framework)",
+                },
+                "consensus": consensus,
+            })
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
+
+    def _handle_filtration(self):
+        """POST /filtration — evaluate at progressive compliance tiers."""
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length)
         try:
@@ -384,6 +479,62 @@ class Handler(BaseHTTPRequestHandler):
         if not path:
             self._send_json({"error": "path is required"}, 400)
             return
+
+        try:
+            ctx = infer_context(path)
+            # Apply overrides
+            for key in ("data_type", "jurisdiction", "contains_pii", "contains_phi",
+                        "contains_financial", "is_audit_log", "is_backed_up",
+                        "has_consumer_request", "created_days_ago", "retention_days"):
+                if req.get(key) is not None:
+                    val = req[key]
+                    if key == "jurisdiction":
+                        ctx.subject_jurisdiction = val
+                    elif key in ("created_days_ago", "retention_days"):
+                        setattr(ctx, key, int(val))
+                    elif key == "data_type":
+                        ctx.data_type = val
+                    else:
+                        setattr(ctx, key, bool(val))
+
+            custom_tiers = req.get("tiers")  # optional: list of lists of reg names
+            payload = {"command": path, "path": path}
+            tiers = evaluate_filtration(action_type, payload, ctx,
+                                         tiers=custom_tiers)
+
+            result = {
+                "tiers": [
+                    {
+                        "regulations": t.regulations,
+                        "braille": {
+                            "word": t.braille.word,
+                            "bits": braille_word_to_bits(t.braille.word),
+                            "state_int": t.braille.state_int,
+                        },
+                        "lagrangian": t.lagrangian,
+                        "permitted": t.permitted,
+                        "blocking": t.blocking,
+                    }
+                    for t in tiers
+                ],
+                "regulation_order": list(REGULATION_ORDER),
+            }
+            self._send_json(result)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
+
+    def _handle_evaluate(self):
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        try:
+            req = json.loads(raw)
+        except Exception as e:
+            return self._send_json({"error": f"Invalid JSON: {e}"}, 400)
+
+        action_type = req.get("action_type", "bash")
+        path = req.get("path", "")
+        if not path:
+            return self._send_json({"error": "path is required"}, 400)
 
         try:
             ctx = infer_context(path)
@@ -413,6 +564,9 @@ class Handler(BaseHTTPRequestHandler):
             payload = {"command": path, "path": path}
             decision = evaluate(action_type, payload, ctx)
 
+            bw = encode_braille_word(decision.constraints)
+            bb = encode_braille_binary(decision.constraints)
+
             result = {
                 "action_id": decision.action_id,
                 "action_type": decision.action_type,
@@ -423,6 +577,17 @@ class Handler(BaseHTTPRequestHandler):
                 "blocking_regulations": decision.blocking_regulations,
                 "mitigations_required": decision.mitigations_required,
                 "justification": decision.justification,
+                "braille": {
+                    "word": bw.word,
+                    "binary": bb,
+                    "bits": braille_word_to_bits(bw.word),
+                    "state_int": bw.state_int,
+                    "cells": bw.cells,
+                    "bits_required": bw.bits_required,
+                    "bits_available": bw.bits_available,
+                    "framework_count": bw.framework_count,
+                    "states_per_framework": bw.states_per_framework,
+                },
                 "constraints": [
                     {
                         "regulation": c.regulation,

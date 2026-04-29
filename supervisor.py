@@ -662,3 +662,142 @@ def print_race_summary(streams: list[ModelStream]) -> None:
               f"tokens={s.token_count:<5} score={score:.2f} "
               f"{s.elapsed_ms:.0f}ms{err}")
     print("═" * 60)
+
+
+# ─── Hardcoded Rule-Based Action Filter ──────────────────────────────────────
+# Structural policy gate that runs on every proposed action BEFORE execution.
+# Catches dangerous patterns regardless of data context. Complements the
+# compliance lattice (which is context-aware) with deterministic rules.
+
+@dataclass
+class FilterVerdict:
+    permitted: bool
+    rule: str          # which rule triggered ("" if permitted)
+    reason: str        # human-readable explanation
+    rewritten: bool = False  # True if the action was modified rather than blocked
+
+    @property
+    def tag(self) -> str:
+        if self.permitted and not self.rewritten:
+            return "PERMIT"
+        if self.rewritten:
+            return "REWRITE"
+        return "BLOCK"
+
+
+# Each rule is (name, check_fn) where check_fn(action) -> Optional[str].
+# Returns a reason string if the rule blocks/fires, or None if it passes.
+_FILTER_RULES: list[tuple[str, "callable"]] = []
+
+
+def _rule(name: str):
+    """Decorator to register a hardcoded filter rule."""
+    def decorator(fn):
+        _FILTER_RULES.append((name, fn))
+        return fn
+    return decorator
+
+
+@_rule("no_recursive_rm")
+def _rule_no_recursive_rm(action: "Action") -> Optional[str]:
+    """Block rm -rf / rm -r on broad paths."""
+    if action.action_type != "bash":
+        return None
+    cmd = (action.payload.get("command") or "").strip()
+    if re.search(r"\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+|--recursive\s+)(/|~|\$HOME|\.\.|/etc|/usr|/var|/System|/bin|/sbin)", cmd):
+        return f"Recursive delete on system-critical path: {cmd[:80]}"
+    return None
+
+
+@_rule("no_curl_pipe_sh")
+def _rule_no_curl_pipe_sh(action: "Action") -> Optional[str]:
+    """Block curl|sh and wget|sh patterns (arbitrary code execution from network)."""
+    if action.action_type not in ("bash", "python_exec"):
+        return None
+    code = (action.payload.get("command") or action.payload.get("code") or "")
+    if re.search(r"(curl|wget)\s.*\|\s*(ba)?sh", code):
+        return "Remote code execution via curl/wget pipe to shell"
+    return None
+
+
+@_rule("no_credential_exfil")
+def _rule_no_credential_exfil(action: "Action") -> Optional[str]:
+    """Block commands that read secrets and pipe to network."""
+    if action.action_type not in ("bash", "python_exec"):
+        return None
+    code = (action.payload.get("command") or action.payload.get("code") or "").lower()
+    secret_files = (".ssh/", ".aws/", ".gnupg/", ".env", "credentials", "id_rsa",
+                    "id_ed25519", ".netrc", ".pgpass", "keychain")
+    network_cmds = ("curl", "wget", "nc ", "ncat", "socat", "scp ", "rsync",
+                    "requests.post", "httpx.post", "urllib")
+    reads_secret = any(s in code for s in secret_files)
+    sends_network = any(n in code for n in network_cmds)
+    if reads_secret and sends_network:
+        return "Potential credential exfiltration: reads secret file and sends to network"
+    return None
+
+
+@_rule("no_disk_wipe")
+def _rule_no_disk_wipe(action: "Action") -> Optional[str]:
+    """Block dd, mkfs, shred on block devices."""
+    if action.action_type != "bash":
+        return None
+    cmd = (action.payload.get("command") or "")
+    if re.search(r"\b(dd\s+.*of=/dev/|mkfs\b|shred\s+/dev/)", cmd):
+        return f"Disk-level destructive command: {cmd[:80]}"
+    return None
+
+
+@_rule("no_privilege_escalation")
+def _rule_no_privilege_escalation(action: "Action") -> Optional[str]:
+    """Block sudo, su, doas — agent should never need privilege escalation."""
+    if action.action_type != "bash":
+        return None
+    cmd = (action.payload.get("command") or "").strip()
+    if re.search(r"^(sudo|su\s|doas\s)", cmd) or re.search(r"[;&|]\s*(sudo|su\s|doas\s)", cmd):
+        return "Privilege escalation not permitted for agent actions"
+    return None
+
+
+@_rule("no_unbounded_writes")
+def _rule_no_unbounded_writes(action: "Action") -> Optional[str]:
+    """Block write_file to system-critical paths."""
+    if action.action_type != "write_file":
+        return None
+    path = (action.payload.get("path") or "")
+    danger = ("/etc/", "/usr/", "/bin/", "/sbin/", "/System/", "/boot/",
+              "/Library/LaunchDaemons/", "/Library/LaunchAgents/")
+    if any(path.startswith(d) for d in danger):
+        return f"Write to protected system path: {path}"
+    return None
+
+
+@_rule("no_env_override_injection")
+def _rule_no_env_override_injection(action: "Action") -> Optional[str]:
+    """Block bash commands that override safety-critical env vars."""
+    if action.action_type != "bash":
+        return None
+    cmd = (action.payload.get("command") or "")
+    blocked_vars = ("AGENT_AUTONOMY=full", "AGENT_BUDGET=performance",
+                    "OPENROUTER_API_KEY=", "OPENAI_API_KEY=", "ANTHROPIC_API_KEY=")
+    for var in blocked_vars:
+        if var in cmd:
+            return f"Attempt to override safety env var: {var.split('=')[0]}"
+    return None
+
+
+def filter_action(action: "Action", verbose: bool = True) -> FilterVerdict:
+    """
+    Run all hardcoded rules against a proposed action.
+    Returns FilterVerdict with permit/block decision and the triggering rule.
+    Short-circuits on first blocking rule (fail-fast).
+    """
+    for rule_name, check_fn in _FILTER_RULES:
+        reason = check_fn(action)
+        if reason:
+            verdict = FilterVerdict(permitted=False, rule=rule_name, reason=reason)
+            if verbose:
+                print(f"\n[filter] 🚫 BLOCKED by rule '{rule_name}': {reason}")
+            return verdict
+
+    return FilterVerdict(permitted=True, rule="", reason="All rules passed")

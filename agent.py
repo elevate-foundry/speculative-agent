@@ -55,7 +55,7 @@ from config import (
     is_private_task,
 )
 from providers import register_key, active_providers, PROVIDER_REGISTRY
-from supervisor import supervise_race, print_race_summary
+from supervisor import supervise_race, print_race_summary, filter_action, FilterVerdict
 from executor import execute, Action, ActionResult
 
 
@@ -299,6 +299,31 @@ class Agent:
             if self.verbose:
                 print_race_summary(streams)
 
+            # ── Audit: log race completion ────────────────────────────
+            try:
+                import hashlib as _hl
+                from audit import log_action as _log_action
+                import executor as _exe
+                _task_hash = _hl.sha256(task.encode()).hexdigest()
+                _race_models = [s.model_name for s in streams]
+                _race_scores = {s.model_name: round(
+                    __import__("supervisor").score_reasoning(s.text), 3
+                ) if s.text else 0.0 for s in streams}
+                _log_action(
+                    action_type="race_complete",
+                    description=f"Raced {len(streams)} models; winner={'none' if action is None else action.model_source}",
+                    payload={"models": _race_models, "scores": _race_scores},
+                    model_source=action.model_source if action else "none",
+                    autonomy=_exe.AUTONOMY,
+                    compliance_verdict="info",
+                    outcome="winner_selected" if action else "no_winner",
+                    outcome_detail=f"scores={_race_scores}",
+                    step=step,
+                    task_hash=_task_hash,
+                )
+            except Exception:
+                pass
+
             if action is None:
                 print("\n[agent] No model produced a valid action. Showing raw outputs:\n")
                 for s in streams:
@@ -320,19 +345,57 @@ class Agent:
                 if action.description and action.description != "(no description)":
                     print(f"  {action.description}")
                 try:
-                    import hashlib as _hl
-                    from audit import log_action as _log_action
-                    import executor as _exe
                     _log_action(
                         action_type="noop", description=action.description,
                         payload={}, model_source=action.model_source,
                         autonomy=_exe.AUTONOMY, compliance_verdict="permit",
                         outcome="success", outcome_detail="Task complete",
-                        step=step, task_hash=_hl.sha256(task.encode()).hexdigest(),
+                        step=step, task_hash=_task_hash,
                     )
                 except Exception:
                     pass
                 break
+
+            # ── Hardcoded rule-based filter (pre-execution gate) ──────
+            fv = filter_action(action, verbose=self.verbose)
+
+            # Audit: log filter verdict
+            try:
+                _log_action(
+                    action_type="filter_verdict",
+                    description=f"Rule filter: {fv.tag} — {fv.rule or 'all_passed'}",
+                    payload={"rule": fv.rule, "reason": fv.reason,
+                             "proposed_action": action.action_type,
+                             "proposed_desc": action.description[:120]},
+                    model_source=action.model_source,
+                    autonomy=_exe.AUTONOMY,
+                    compliance_verdict=fv.tag.lower(),
+                    outcome="permit" if fv.permitted else "blocked",
+                    outcome_detail=fv.reason[:300],
+                    step=step,
+                    task_hash=_task_hash,
+                )
+            except Exception:
+                pass
+
+            if not fv.permitted:
+                print(f"\n[agent] ⛔ Step {step} blocked by rule filter: {fv.rule}")
+                consecutive_failures += 1
+                if consecutive_failures >= max_retries_per_step:
+                    print(f"[agent] {consecutive_failures} consecutive filter blocks. Stopping.")
+                    break
+                # Feed the block reason back into history so models can adapt
+                self.history.append({
+                    "task": task, "step": step,
+                    "action_type": "filter_block",
+                    "model": action.model_source,
+                    "description": f"BLOCKED by {fv.rule}: {fv.reason}",
+                    "success": False,
+                    "result": f"SYSTEM: Your proposed action was blocked by safety rule '{fv.rule}': "
+                              f"{fv.reason}. Propose a different, safer action.",
+                    "error": fv.reason,
+                })
+                continue
 
             print(f"\n[agent] Step {step} — {action.action_type} from [{action.model_source}]: {action.description}")
 
@@ -341,9 +404,6 @@ class Agent:
 
             # SOC 2 CC6.1 — append tamper-evident audit log entry
             try:
-                import hashlib as _hl
-                from audit import log_action as _log_action
-                import executor as _exe
                 _log_action(
                     action_type=action.action_type,
                     description=action.description,
@@ -354,7 +414,7 @@ class Agent:
                     outcome="success" if result.success else "failure",
                     outcome_detail=(result.output or result.error or "")[:300],
                     step=step,
-                    task_hash=_hl.sha256(task.encode()).hexdigest(),
+                    task_hash=_task_hash,
                 )
             except Exception:
                 pass

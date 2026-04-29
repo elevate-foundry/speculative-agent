@@ -561,17 +561,96 @@ the foundational regulations (SOC~II, GDPR, HIPAA, CCPA, FCRA, GLBA),
 while the computer extension handles the data-format and information-security
 standards that post-date Braille's original design.
 
-\begin{corollary}[8-Dot Completeness]
-The 8-dot Braille lattice $\mathcal{B}_8$ is sufficient to encode any
-compliance decision vector for the nine regulatory frameworks in our
-current implementation, with $2^8 - 9 = 247$ unused codepoints reserved
-for future regulatory expansion.
+\begin{corollary}[8-Dot Completeness --- Binary Case]
+\label{cor:8dot}
+For the \emph{binary} case $S=2$ (Permit/Block), the 8-dot lattice
+$\mathcal{B}_8$ encodes up to $2^8 = 256$ distinct decision vectors,
+sufficient for $k \leq 8$ frameworks as a single Unicode character.
+For $k = 9$ binary frameworks, one additional bit is required ($d=9$),
+yielding a two-cell encoding.
 \end{corollary}
 
-This has a direct engineering consequence: the compliance state of any agent
-action can be serialized as a single Unicode character in the Braille Patterns
-block, transmitted over any channel that carries UTF-8, rendered on a refreshable
-Braille display, and reconstructed with a single byte comparison.
+\subsection{Extension to $n$-Dot Hyper-Braille}
+\label{sec:ndot}
+
+The binary encoding in Corollary~\ref{cor:8dot} treats each verdict as
+a single bit, collapsing the ternary distinction between \textsc{Conditional}
+and \textsc{Block}. To preserve the full state space, we generalize
+to $S$-ary encodings.
+
+\begin{definition}[$n$-Dot Dimension]
+To encode $F$ regulatory frameworks, each with $S$ compliance states
+(\emph{e.g.}\ $S=3$ for Permit/Conditional/Block), the required
+bit-dimension is:
+\begin{equation}
+  d = \lceil F \cdot \log_2 S \rceil
+  \label{eq:ndot-dim}
+\end{equation}
+The number of standard 8-dot Braille cells needed is
+$c = \lceil d / 8 \rceil$.
+\end{definition}
+
+For the current system ($F=9$, $S=3$):
+\begin{equation}
+  d = \lceil 9 \cdot \log_2 3 \rceil = \lceil 9 \times 1.5849 \rceil = 15
+  \quad \Longrightarrow \quad
+  c = \lceil 15/8 \rceil = 2 \text{ cells}
+\end{equation}
+A compliance decision is thus a two-character Braille \emph{word}
+with $2^{16} = 65{,}536$ available codepoints --- more than sufficient
+for the $3^9 = 19{,}683$ possible ternary states.
+
+\begin{theorem}[Braille Word Encoding]
+\label{thm:braille-word}
+Let $\mathbf{v}(a) = (v_1, \ldots, v_F)$ be the ternary verdict vector
+with $v_i \in \{0, 1, 2\}$ (Permit, Conditional, Block).
+The mixed-radix encoding
+\begin{equation}
+  N(\mathbf{v}) = \sum_{i=1}^{F} v_i \cdot S^{i-1}
+  \label{eq:mixed-radix}
+\end{equation}
+maps $\mathbf{v}$ to an integer $N \in [0, S^F - 1]$.
+Decomposing $N$ into 8-bit little-endian bytes
+$N = \sum_{j=0}^{c-1} b_j \cdot 2^{8j}$ with $b_j \in [0, 255]$,
+each byte maps to a Unicode Braille character
+$\texttt{U+2800} + b_j$, yielding a $c$-cell word
+$w = (w_0, \ldots, w_{c-1})$.
+
+\noindent
+The encoding is:
+\begin{enumerate}
+  \item \textbf{Injective}: distinct verdict vectors produce distinct words.
+  \item \textbf{Invertible}: $\mathbf{v}$ is recoverable from $w$ by
+        reversing the byte decomposition and mixed-radix unpacking.
+  \item \textbf{Lattice-preserving}: the all-Permit vector
+        $\mathbf{0}$ maps to the Braille space word
+        $(\texttt{U+2800})^c$ --- the unique minimum element.
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+Injectivity follows from the bijectivity of mixed-radix representation
+over $\{0,\ldots,S^F-1\}$. Invertibility follows from unique $S$-ary
+decomposition. Lattice preservation: $N(\mathbf{0}) = 0$, and
+$0 = \sum_{j} 0 \cdot 2^{8j}$ maps each cell to \texttt{U+2800}
+(blank Braille), the lattice bottom.
+\end{proof}
+
+\paragraph{Tactile ergonomics.}
+A two-cell word remains within the gestalt perception window of a
+human fingertip ($\approx$16\,mm), preserving the single-touch readout
+property of the original 6-dot and 8-dot encodings.
+For future regulatory expansion beyond $F=16$ ($d > 16$, requiring
+$c \geq 3$ cells), scanning becomes sequential rather than gestalt ---
+an acceptable trade-off given that standard Grade~2 Braille already
+requires multi-cell contractions.
+
+\paragraph{Unicode compatibility.}
+Each cell uses the standard Braille Patterns block
+(\texttt{U+2800}--\texttt{U+28FF}), so the encoding remains within
+established Unicode, unlike hypothetical single-character mappings into
+CJK or Private Use blocks. The word can be transmitted over any UTF-8
+channel and rendered on any refreshable Braille display.
 
 \subsection{Braille Grade 2 as a Compression Lattice}
 
@@ -580,7 +659,7 @@ letter combinations). This is precisely a \emph{lattice homomorphism}:
 $\varphi: \mathcal{B}^* \to \mathcal{B}^*$ that preserves meaning while
 minimizing cell count. The analogy to our compliance system:
 the Lagrangian $\mathcal{L}$ is a Grade~2 contraction of the full regulatory
-text — it preserves the compliance meaning (permitted/blocked) while compressing
+text --- it preserves the compliance meaning (permitted/blocked) while compressing
 nine regulatory frameworks into a single scalar.
 
 % ─────────────────────────────────────────────────────────────────────────────

@@ -207,7 +207,7 @@
   </div>
 
   <div>
-    <div class="sec">8-dot Braille compliance state</div>
+    <div class="sec">8-dot binary cell (permit/block)</div>
     <div id="bcell">
       <!-- col1: dots 1,2,3,7  col2: dots 4,5,6,8 -->
       <div class="bdot" id="b1" title="dot 1 — SOC-II"></div>
@@ -220,7 +220,18 @@
       <div class="bdot" id="b8" title="dot 8 — ISO-27001"></div>
     </div>
     <div style="text-align:center;font-size:.65rem;color:var(--muted);font-family:var(--mono);margin-top:.35rem">
-      raised (red) = violation &nbsp;·&nbsp; lit (green) = permit
+      raised (red) = block &nbsp;·&nbsp; lit (green) = permit
+    </div>
+  </div>
+
+  <div>
+    <div class="sec">n-dot ternary Braille word (15b → 2 cells)</div>
+    <div id="braille-word" style="text-align:center;font-size:2.5rem;font-family:var(--mono);padding:.4rem 0;letter-spacing:.3em;color:var(--gold);" aria-label="Braille compliance word">⠀⠀</div>
+    <div id="braille-meta" style="text-align:center;font-size:.65rem;color:var(--muted);font-family:var(--mono);">
+      d=15 bits · F=9 · S=3 · state=0
+    </div>
+    <div id="braille-bits" style="text-align:center;font-size:.65rem;color:var(--muted);font-family:var(--mono);margin-top:.2rem">
+      00000000 00000000
     </div>
   </div>
 
@@ -540,7 +551,7 @@ function refresh() {
     ? (ev.lagrangian > 0 ? "#e07b39" : "#2d9a6b")
     : "#c1121f";
 
-  // Braille cell
+  // Braille cell (8-dot binary)
   Object.entries(DOT_MAP).forEach(([reg, dotId]) => {
     const el = document.getElementById(dotId);
     const v = ev.results[reg]?.v;
@@ -548,6 +559,44 @@ function refresh() {
     if (v === "BLOCK") el.classList.add("raised");
     else if (v === "PERMIT") el.classList.add("permit-lit");
   });
+
+  // n-dot ternary Braille word encoding
+  // Maps: PERMIT→0, CONDITIONAL→1, BLOCK→2 then mixed-radix packing
+  const TRIT = { "PERMIT": 0, "CONDITIONAL": 1, "BLOCK": 2 };
+  const REG_ORDER = ["SOC-II","GDPR","CCPA","HIPAA","GLBA","FCRA","Metro-II","PIPL","ISO-27001"];
+  const S = 3, F = REG_ORDER.length;
+  // d = ceil(F * log2(S)) = ceil(9 * 1.5849) = 15
+  const d = Math.ceil(F * Math.log2(S));
+  const cellsNeeded = Math.ceil(d / 8);
+
+  // Mixed-radix: state_int = Σ trit_i · S^i
+  let stateInt = 0;
+  let power = 1;
+  for (let i = 0; i < REG_ORDER.length; i++) {
+    const reg = REG_ORDER[i];
+    const v = ev.results[reg]?.v || "PERMIT";
+    stateInt += (TRIT[v] || 0) * power;
+    power *= S;
+  }
+
+  // Pack into 8-bit Braille cells (U+2800 base, little-endian)
+  let brailleWord = "";
+  let bitStrs = [];
+  let val = stateInt;
+  for (let c = 0; c < cellsNeeded; c++) {
+    const byte = val & 0xFF;
+    brailleWord += String.fromCodePoint(0x2800 + byte);
+    bitStrs.push(byte.toString(2).padStart(8, "0"));
+    val >>= 8;
+  }
+
+  document.getElementById("braille-word").textContent = brailleWord;
+  document.getElementById("braille-word").style.color =
+    stateInt === 0 ? "var(--permit)" :
+    ev.permitted ? "var(--cond)" : "var(--block)";
+  document.getElementById("braille-meta").textContent =
+    `d=${d} bits · F=${F} · S=${S} · state=${stateInt}`;
+  document.getElementById("braille-bits").textContent = bitStrs.join(" ");
 
   // Reg list
   const list = document.getElementById("reg-list");

@@ -292,6 +292,8 @@ class ComplianceDecision:
     mitigations_required: list[str]  # steps required for CONDITIONAL verdicts
     blocking_regulations: list[str]
     justification: str               # human-readable summary for audit log
+    braille_word: str = ""           # n-dot ternary encoding (multi-cell)
+    braille_binary: str = ""         # 8-dot binary encoding (single-cell)
 
 
 def evaluate(action_type: str, payload: dict, context: DataContext) -> ComplianceDecision:
@@ -335,6 +337,14 @@ def evaluate(action_type: str, payload: dict, context: DataContext) -> Complianc
             f"Lagrangian L={lagrangian:.2f} > 0 — no valid justification path exists in the constraint lattice."
         )
 
+    # Braille encoding — computed lazily here to avoid circular import
+    try:
+        _bw = encode_braille_word(results)
+        _bb = encode_braille_binary(results)
+    except Exception:
+        _bw = None
+        _bb = ""
+
     decision = ComplianceDecision(
         action_id=action_id,
         action_type=action_type,
@@ -346,6 +356,8 @@ def evaluate(action_type: str, payload: dict, context: DataContext) -> Complianc
         mitigations_required=mitigations,
         blocking_regulations=blocking,
         justification=justification,
+        braille_word=_bw.word if _bw else "",
+        braille_binary=_bb,
     )
 
     _write_audit_log(decision)
@@ -372,6 +384,8 @@ def _write_audit_log(decision: ComplianceDecision) -> None:
         "blocking": decision.blocking_regulations,
         "mitigations": decision.mitigations_required,
         "justification": decision.justification,
+        "braille_word": decision.braille_word,
+        "braille_binary": decision.braille_binary,
         "constraints": [
             {"regulation": r.regulation, "verdict": r.verdict.name, "rationale": r.rationale}
             for r in decision.constraints
@@ -509,6 +523,509 @@ def print_decision(decision: ComplianceDecision) -> None:
             print(f"    • {m[:75]}")
     if decision.blocking_regulations:
         print(f"\n  BLOCKED BY: {', '.join(decision.blocking_regulations)}")
-    print(f"\n  Audit ID : {decision.action_id}")
+    # Braille encoding
+    braille = encode_braille_word(decision.constraints)
+    binary_cell = encode_braille_binary(decision.constraints)
+    print(f"\n  Braille  : {braille.word}  (ternary, {braille.cells}-cell, {braille.bits_required}b)")
+    print(f"  Binary   : {binary_cell}  (8-dot, permit/block only)")
+    print(f"  Audit ID : {decision.action_id}")
     print(f"  Log      : {AUDIT_LOG_PATH}")
     print(f"{'═'*60}\n")
+
+
+# ─── n-Dot Hyper-Braille Encoding ───────────────────────────────────────────
+#
+# Mathematical foundation:
+#   To encode F frameworks × S states per framework, we need:
+#     d = ⌈F · log₂(S)⌉ bits
+#   Each 8-dot Braille cell holds 8 bits (Unicode U+2800–U+28FF).
+#   Required cells: ⌈d / 8⌉
+#
+#   Current system: F=9 frameworks, S=3 states (Permit/Conditional/Block)
+#     d = ⌈9 · log₂(3)⌉ = ⌈9 · 1.5849⌉ = 15 bits
+#     cells = ⌈15 / 8⌉ = 2 cells → a two-character Braille "word"
+#
+# The encoding preserves the tropical lattice structure:
+#   - The all-Permit state (0,0,...,0) maps to ⠀⠀ (Braille space × 2)
+#   - Any raised dot signals a non-Permit verdict
+#   - The word's integer value equals the mixed-radix compliance vector
+#
+# Backward compatibility:
+#   encode_braille_binary() provides the original 8-dot single-cell encoding
+#   for the binary (Permit/Block) case, fitting in U+2800–U+28FF.
+# ─────────────────────────────────────────────────────────────────────────────
+
+import math as _math
+
+
+# Verdict → ternary digit: Permit=0, Conditional=1, Block=2
+_VERDICT_TO_TRIT = {
+    Verdict.PERMIT:      0,
+    Verdict.CONDITIONAL: 1,
+    Verdict.BLOCK:       2,
+}
+_TRIT_TO_VERDICT = {v: k for k, v in _VERDICT_TO_TRIT.items()}
+
+# Canonical regulation ordering (matches _CONSTRAINTS list and dot assignments)
+REGULATION_ORDER = [
+    "SOC-II", "GDPR", "CCPA", "HIPAA", "GLBA",
+    "FCRA", "Metro-II/CDIA", "PIPL", "ISO-27001",
+]
+
+
+@dataclass
+class BrailleWord:
+    """A multi-cell Braille encoding of a compliance decision vector."""
+    word: str                # Unicode Braille string (1+ characters)
+    cells: int               # number of 8-dot cells used
+    bits_required: int       # theoretical bits needed (d = ⌈F·log₂S⌉)
+    bits_available: int      # actual bits (cells × 8)
+    state_int: int           # integer encoding of the compliance vector
+    framework_count: int     # F
+    states_per_framework: int  # S
+
+
+def ndot_dimension(frameworks: int, states: int = 3) -> int:
+    """
+    Compute d = ⌈F · log₂(S)⌉ — the exact bit-dimension required to
+    encode F frameworks with S states each.
+    """
+    if states <= 1:
+        return 0
+    return _math.ceil(frameworks * _math.log2(states))
+
+
+def encode_braille_word(constraints: list[ConstraintResult],
+                        states: int = 3) -> BrailleWord:
+    """
+    Encode a compliance decision vector as a multi-cell Braille word.
+
+    Maps each framework's verdict to a trit (0/1/2), packs them into a
+    mixed-radix integer, then splits into 8-bit chunks, each rendered as
+    a Unicode Braille character (U+2800 + byte_value).
+
+    For 9 ternary frameworks: 2-cell word (16 bits available, 15 needed).
+    The all-PERMIT state encodes to ⠀⠀ (two Braille spaces).
+    """
+    F = len(constraints)
+    d = ndot_dimension(F, states)
+    cells_needed = max(1, _math.ceil(d / 8))
+
+    # Mixed-radix encoding: state_int = Σ trit_i · S^i
+    state_int = 0
+    for i, cr in enumerate(constraints):
+        trit = _VERDICT_TO_TRIT.get(cr.verdict, 0)
+        state_int += trit * (states ** i)
+
+    # Pack into 8-bit Braille cells (little-endian byte order)
+    word = ""
+    val = state_int
+    for _ in range(cells_needed):
+        byte_val = val & 0xFF
+        word += chr(0x2800 + byte_val)
+        val >>= 8
+
+    return BrailleWord(
+        word=word,
+        cells=cells_needed,
+        bits_required=d,
+        bits_available=cells_needed * 8,
+        state_int=state_int,
+        framework_count=F,
+        states_per_framework=states,
+    )
+
+
+def decode_braille_word(word: str, framework_count: int = 9,
+                        states: int = 3) -> list[Verdict]:
+    """
+    Decode a Braille word back to a list of Verdict values.
+    Inverse of encode_braille_word.
+    """
+    # Reconstruct integer from Braille cells
+    state_int = 0
+    for i, ch in enumerate(word):
+        byte_val = ord(ch) - 0x2800
+        if not (0 <= byte_val <= 255):
+            raise ValueError(f"Character {ch!r} is not a valid Braille pattern")
+        state_int |= byte_val << (8 * i)
+
+    # Unpack mixed-radix digits
+    verdicts = []
+    for _ in range(framework_count):
+        trit = state_int % states
+        verdicts.append(_TRIT_TO_VERDICT.get(trit, Verdict.PERMIT))
+        state_int //= states
+
+    return verdicts
+
+
+def encode_braille_binary(constraints: list[ConstraintResult]) -> str:
+    """
+    Original 8-dot encoding for the binary case (Permit=0, Block=1).
+    CONDITIONAL is mapped to Block (raised dot) for the binary view.
+    Returns a single Unicode Braille character.
+
+    Backward-compatible with the paper's Theorem 4.1 (Braille–Compliance
+    Isomorphism) for k ≤ 8 frameworks. For k > 8, returns multi-cell.
+    """
+    bits = 0
+    for i, cr in enumerate(constraints):
+        if cr.verdict != Verdict.PERMIT:
+            bits |= (1 << i)
+
+    if bits <= 0xFF:
+        return chr(0x2800 + bits)
+
+    # k > 8: multi-cell binary encoding
+    word = ""
+    val = bits
+    cells = _math.ceil(len(constraints) / 8)
+    for _ in range(cells):
+        word += chr(0x2800 + (val & 0xFF))
+        val >>= 8
+    return word
+
+
+def braille_word_to_bits(word: str) -> str:
+    """Return the raw bit string of a Braille word (for debugging/display)."""
+    bits = []
+    for ch in word:
+        byte_val = ord(ch) - 0x2800
+        bits.append(format(byte_val, '08b'))
+    return " ".join(bits)
+
+
+# ─── Lattice Operations on Braille Words (Model State Bridge) ────────────────
+#
+# Two models produce verdict vectors v_A, v_B ∈ {0,1,2}^F.
+# Their Braille words w_A, w_B are mixed-radix integers.
+#
+# The lattice operations on the verdict space are:
+#   meet(v_A, v_B)_i = max(v_A_i, v_B_i)  — conservative (take strictest)
+#   join(v_A, v_B)_i = min(v_A_i, v_B_i)  — permissive (take most lenient)
+#
+# In the tropical semiring (max-plus):
+#   meet = tropical addition (max)
+#   join = tropical multiplication (min under the dual)
+#
+# This gives us a principled way to bridge any two models' state spaces:
+#   1. Project each model's output through the compliance lattice → verdict vector
+#   2. Encode each verdict vector as a Braille word
+#   3. Use meet/join/distance to merge, compare, or translate between them
+# ─────────────────────────────────────────────────────────────────────────────
+
+def braille_meet(word_a: str, word_b: str,
+                 framework_count: int = 9, states: int = 3) -> str:
+    """
+    Conservative merge of two Braille words.
+    Takes the strictest (max) verdict per framework.
+    meet(P,C)=C, meet(C,B)=B, meet(P,B)=B.
+
+    In the tropical semiring: this is tropical addition (⊕ = max).
+    If either model says BLOCK, the merged result is BLOCK.
+    """
+    va = decode_braille_word(word_a, framework_count, states)
+    vb = decode_braille_word(word_b, framework_count, states)
+
+    # max over trit values: PERMIT=0 < CONDITIONAL=1 < BLOCK=2
+    merged = []
+    for a, b in zip(va, vb):
+        ta = _VERDICT_TO_TRIT[a]
+        tb = _VERDICT_TO_TRIT[b]
+        merged.append(ConstraintResult("merged", _TRIT_TO_VERDICT[max(ta, tb)], "meet"))
+
+    return encode_braille_word(merged, states).word
+
+
+def braille_join(word_a: str, word_b: str,
+                 framework_count: int = 9, states: int = 3) -> str:
+    """
+    Permissive merge of two Braille words.
+    Takes the most lenient (min) verdict per framework.
+    join(P,C)=P, join(C,B)=C, join(P,B)=P.
+
+    In the tropical semiring: this is the dual operation (min).
+    Both models must agree on BLOCK for the merged result to be BLOCK.
+    """
+    va = decode_braille_word(word_a, framework_count, states)
+    vb = decode_braille_word(word_b, framework_count, states)
+
+    merged = []
+    for a, b in zip(va, vb):
+        ta = _VERDICT_TO_TRIT[a]
+        tb = _VERDICT_TO_TRIT[b]
+        merged.append(ConstraintResult("merged", _TRIT_TO_VERDICT[min(ta, tb)], "join"))
+
+    return encode_braille_word(merged, states).word
+
+
+def braille_hamming(word_a: str, word_b: str,
+                    framework_count: int = 9, states: int = 3) -> int:
+    """
+    Hamming distance between two Braille words in verdict space.
+    Counts the number of frameworks where the two models disagree.
+    Range: 0 (identical) to F (total disagreement).
+    """
+    va = decode_braille_word(word_a, framework_count, states)
+    vb = decode_braille_word(word_b, framework_count, states)
+    return sum(1 for a, b in zip(va, vb) if a != b)
+
+
+def braille_drift(word_a: str, word_b: str,
+                  framework_count: int = 9, states: int = 3) -> float:
+    """
+    Weighted drift between two Braille words.
+    Like Hamming distance but weighted by trit difference magnitude.
+    Range: 0.0 (identical) to 1.0 (maximal divergence: all P↔B).
+
+    Useful for detecting when two models' compliance views are diverging
+    beyond a threshold — triggering re-evaluation or human review.
+    """
+    va = decode_braille_word(word_a, framework_count, states)
+    vb = decode_braille_word(word_b, framework_count, states)
+    max_drift = framework_count * (states - 1)  # F * 2 for ternary
+    if max_drift == 0:
+        return 0.0
+    total = sum(abs(_VERDICT_TO_TRIT[a] - _VERDICT_TO_TRIT[b]) for a, b in zip(va, vb))
+    return total / max_drift
+
+
+def project_to_braille(action_type: str, payload: dict,
+                       context: "DataContext") -> BrailleWord:
+    """
+    Project any action through the compliance lattice into a Braille word.
+
+    This is the fundamental bridge operation: regardless of which model
+    proposed the action, the compliance lattice maps it to a canonical
+    verdict vector in {Permit, Conditional, Block}^F, which then encodes
+    as a Braille word.
+
+    Two different models proposing the same action get the same Braille word.
+    Two different models proposing different actions get comparable words
+    that can be merged with meet/join or measured with hamming/drift.
+    """
+    decision = evaluate(action_type, payload, context)
+    return encode_braille_word(decision.constraints)
+
+
+def bridge_model_states(
+    streams: list,
+    task_context: "DataContext",
+    verbose: bool = False,
+) -> dict:
+    """
+    Bridge multiple models' state spaces through the Braille lattice.
+
+    Given a list of ModelStream objects (from a race), extract each model's
+    proposed action, project through the compliance lattice, and return:
+      - Per-model Braille words
+      - Pairwise Hamming distances and drift scores
+      - Conservative merge (meet) and permissive merge (join) of all models
+      - Consensus flag (all words identical)
+
+    This enables:
+      1. Detecting disagreement between models on compliance
+      2. Choosing between models based on their compliance profile
+      3. Merging multiple models' views into a single verdict
+      4. Measuring drift over time as models evolve
+    """
+    from executor import parse_action_from_text
+
+    words = {}
+    for s in streams:
+        if not s.text:
+            continue
+        action = parse_action_from_text(s.text, s.model_name)
+        if action is None:
+            continue
+        bw = project_to_braille(
+            action.action_type, action.payload, task_context)
+        words[s.model_name] = bw
+
+    if not words:
+        return {"words": {}, "consensus": True, "pairwise": {},
+                "meet": None, "join": None}
+
+    names = list(words.keys())
+    braille_strings = {n: w.word for n, w in words.items()}
+
+    # Pairwise distances
+    pairwise = {}
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            h = braille_hamming(braille_strings[a], braille_strings[b])
+            d = braille_drift(braille_strings[a], braille_strings[b])
+            pairwise[(a, b)] = {"hamming": h, "drift": round(d, 4)}
+
+    # Consensus: all words identical
+    word_set = set(braille_strings.values())
+    consensus = len(word_set) == 1
+
+    # Global meet (conservative) and join (permissive) across all models
+    meet_word = braille_strings[names[0]]
+    join_word = braille_strings[names[0]]
+    for n in names[1:]:
+        meet_word = braille_meet(meet_word, braille_strings[n])
+        join_word = braille_join(join_word, braille_strings[n])
+
+    if verbose:
+        print(f"\n[bridge] {len(words)} models projected through Braille lattice")
+        for n, w in words.items():
+            print(f"  {n:<30}  {w.word}  state={w.state_int}")
+        if pairwise:
+            print(f"  Pairwise distances:")
+            for (a, b), d in pairwise.items():
+                a_short = a.split("/")[-1][:16]
+                b_short = b.split("/")[-1][:16]
+                print(f"    {a_short} ↔ {b_short}:  hamming={d['hamming']}  drift={d['drift']:.3f}")
+        print(f"  Consensus: {'✓' if consensus else '✗ DIVERGENT'}")
+        print(f"  Meet (conservative): {meet_word}   Join (permissive): {join_word}")
+
+    return {
+        "words": {n: w.word for n, w in words.items()},
+        "state_ints": {n: w.state_int for n, w in words.items()},
+        "consensus": consensus,
+        "pairwise": pairwise,
+        "meet": meet_word,
+        "join": join_word,
+    }
+
+
+# ─── Lattice Filtration ─────────────────────────────────────────────────────
+#
+# A "filtration" is a nested sequence of sub-lattices:
+#   F₁ ⊆ F₂ ⊆ ... ⊆ Fₖ
+#
+# In our system each Fᵢ is a set of active regulations. Adding a regulation
+# can only raise (never lower) the verdict for each framework position,
+# because a regulation either contributes a non-PERMIT verdict or PERMIT
+# (which changes nothing). This gives the monotonicity property:
+#
+#   v(Fᵢ) ≤ v(Fᵢ₊₁)  componentwise (in the {P=0, C=1, B=2} order)
+#
+# Equivalently, the Braille words form a chain under the lattice partial order:
+#   w(F₁) ≤ w(F₂) ≤ ... ≤ w(Fₖ)
+#
+# This is what "FCRA-abiding vs FCRA+GLBA-abiding vs full-lattice" means:
+# each tier is a point on this chain, and the Braille word at each tier
+# encodes exactly which regulations are active and what they say.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Map regulation names to their constraint functions
+_CONSTRAINT_BY_NAME = {
+    "SOC-II":       _check_soc,
+    "GDPR":         _check_gdpr,
+    "CCPA":         _check_ccpa,
+    "HIPAA":        _check_hipaa,
+    "GLBA":         _check_glba,
+    "FCRA":         _check_fcra,
+    "Metro-II/CDIA": _check_metro2_cdia,
+    "PIPL":         _check_pipl,
+    "ISO-27001":    _check_iso27001,
+}
+
+# Payload-aware constraints (need the payload argument)
+_PAYLOAD_CONSTRAINTS = {_check_soc, _check_gdpr, _check_ccpa, _check_iso27001}
+
+
+@dataclass
+class FiltrationTier:
+    """One level in a lattice filtration."""
+    regulations: list[str]          # active regulations at this tier
+    constraints: list[ConstraintResult]  # per-regulation verdicts
+    braille: BrailleWord            # n-dot encoding of this tier
+    lagrangian: float               # tropical max of λᵢ·vᵢ
+    permitted: bool                 # no BLOCKs at this tier
+    blocking: list[str]             # which regulations BLOCK at this tier
+
+
+def evaluate_filtration(
+    action_type: str,
+    payload: dict,
+    context: "DataContext",
+    tiers: list[list[str]] = None,
+    verbose: bool = False,
+) -> list[FiltrationTier]:
+    """
+    Evaluate an action at progressively higher compliance tiers.
+
+    Each tier is a list of regulation names. The default tiers are:
+      1. FCRA only
+      2. FCRA + GLBA
+      3. FCRA + GLBA + SOC-II
+      4. FCRA + GLBA + SOC-II + HIPAA
+      5. FCRA + GLBA + SOC-II + HIPAA + GDPR + CCPA
+      6. Full lattice (all 9 regulations)
+
+    Returns a list of FiltrationTier objects forming a monotonic chain.
+    The Braille word at tier i is componentwise ≤ the word at tier i+1.
+    """
+    if tiers is None:
+        tiers = [
+            ["FCRA"],
+            ["FCRA", "GLBA"],
+            ["FCRA", "GLBA", "SOC-II"],
+            ["FCRA", "GLBA", "SOC-II", "HIPAA"],
+            ["FCRA", "GLBA", "SOC-II", "HIPAA", "GDPR", "CCPA"],
+            list(REGULATION_ORDER),  # full lattice
+        ]
+
+    results = []
+    for tier_regs in tiers:
+        # Evaluate only the constraints in this tier
+        constraints = []
+        for reg in REGULATION_ORDER:
+            if reg in tier_regs:
+                fn = _CONSTRAINT_BY_NAME[reg]
+                if fn in _PAYLOAD_CONSTRAINTS:
+                    cr = fn(context, action_type, payload)
+                else:
+                    cr = fn(context, action_type)
+                constraints.append(cr)
+            else:
+                # Regulation not active at this tier → PERMIT (no constraint)
+                constraints.append(ConstraintResult(reg, Verdict.PERMIT,
+                                                    f"{reg} not active at this tier"))
+
+        bw = encode_braille_word(constraints)
+        lagrangian = max(
+            (r.lagrangian_lambda * r.verdict.lagrangian_weight for r in constraints),
+            default=0.0)
+        blocking = [r.regulation for r in constraints if r.verdict == Verdict.BLOCK]
+
+        tier = FiltrationTier(
+            regulations=tier_regs,
+            constraints=constraints,
+            braille=bw,
+            lagrangian=lagrangian,
+            permitted=len(blocking) == 0,
+            blocking=blocking,
+        )
+        results.append(tier)
+
+    if verbose:
+        print(f"\n{'═'*72}")
+        print(f"  LATTICE FILTRATION — {action_type} on {context.path}")
+        print(f"{'─'*72}")
+        prev_word = None
+        for i, t in enumerate(results):
+            regs_str = "+".join(t.regulations)
+            icon = "✓" if t.permitted else "✗"
+            mono = ""
+            if prev_word is not None:
+                # Verify monotonicity
+                prev_v = decode_braille_word(prev_word, len(REGULATION_ORDER))
+                curr_v = decode_braille_word(t.braille.word, len(REGULATION_ORDER))
+                mono_ok = all(
+                    _VERDICT_TO_TRIT[curr_v[j]] >= _VERDICT_TO_TRIT[prev_v[j]]
+                    for j in range(len(REGULATION_ORDER)))
+                mono = " ≥ prev ✓" if mono_ok else " ≥ prev ✗ VIOLATION"
+            print(f"  F{i}: {t.braille.word}  ℒ={t.lagrangian:.2f}  "
+                  f"{icon}  [{regs_str}]{mono}")
+            if t.blocking:
+                print(f"      BLOCKED: {', '.join(t.blocking)}")
+            prev_word = t.braille.word
+        print(f"{'═'*72}\n")
+
+    return results

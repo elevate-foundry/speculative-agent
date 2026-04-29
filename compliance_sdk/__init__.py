@@ -63,11 +63,19 @@ from compliance import (
     FiltrationTier,
 )
 
+from bbid import get_bbid, bbid_header, BBID, verify_bbid
+
 __all__ = [
     # High-level API
     "evaluate_action",
     "evaluate_action_with_context",
     "ActionResult",
+
+    # BBID (agent identity)
+    "get_bbid",
+    "bbid_header",
+    "BBID",
+    "verify_bbid",
 
     # Core types
     "DataContext",
@@ -141,6 +149,12 @@ class ActionResult:
         self.framework_count = braille.framework_count
         self.states_per_framework = braille.states_per_framework
 
+        # BBID — agent identity
+        _bbid = get_bbid()
+        self.bbid = _bbid.braille
+        self.bbid_agent_id = _bbid.agent_id
+        self.header = bbid_header(_bbid, braille.word)
+
         # Verdict string
         if not decision.permitted:
             self.verdict = "BLOCK"
@@ -151,7 +165,7 @@ class ActionResult:
 
     def __repr__(self):
         return (f"ActionResult(verdict={self.verdict!r}, braille={self.braille_word!r}, "
-                f"ℒ={self.lagrangian:.2f}, blocking={self.blocking})")
+                f"ℒ={self.lagrangian:.2f}, bbid={self.bbid[:4]}…, blocking={self.blocking})")
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dict for API responses."""
@@ -168,6 +182,9 @@ class ActionResult:
             "mitigations": self.mitigations,
             "justification": self.justification,
             "action_id": self.action_id,
+            "bbid": self.bbid,
+            "bbid_agent_id": self.bbid_agent_id,
+            "header": self.header,
             "constraints": [
                 {"regulation": c.regulation, "verdict": c.verdict.name, "rationale": c.rationale}
                 for c in self.constraints

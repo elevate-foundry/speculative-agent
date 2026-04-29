@@ -119,19 +119,35 @@ async def _stream_ollama(
     ollama_base: str,
     color: str,
     live_output: bool,
+    screenshot_b64: Optional[str] = None,
 ) -> None:
     import httpx
     import json as _json
 
-    payload = {
-        "model": model_name,
-        "prompt": prompt,
-        "stream": True,
-        "system": system_prompt,
-        "options": {"temperature": 0.3, "num_predict": 512},
-    }
+    # Use /api/chat with images when a screenshot is provided (vision models)
+    if screenshot_b64:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt, "images": [screenshot_b64]},
+            ],
+            "stream": True,
+            "options": {"temperature": 0.3, "num_predict": 512},
+        }
+        endpoint = f"{ollama_base}/api/chat"
+    else:
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": True,
+            "system": system_prompt,
+            "options": {"temperature": 0.3, "num_predict": 512},
+        }
+        endpoint = f"{ollama_base}/api/generate"
+
     async with httpx.AsyncClient(timeout=120) as client:
-        async with client.stream("POST", f"{ollama_base}/api/generate", json=payload) as resp:
+        async with client.stream("POST", endpoint, json=payload) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if cancel_event.is_set():
@@ -143,7 +159,11 @@ async def _stream_ollama(
                     chunk = _json.loads(line)
                 except _json.JSONDecodeError:
                     continue
-                token = chunk.get("response", "")
+                # /api/chat returns message.content; /api/generate returns response
+                if "message" in chunk:
+                    token = chunk["message"].get("content", "")
+                else:
+                    token = chunk.get("response", "")
                 if token:
                     stream_obj.tokens.append(token)
                 if chunk.get("done", False):
@@ -383,7 +403,8 @@ async def stream_model(
                                      max_tokens=max_tokens)
         else:
             await _stream_ollama(model_name, prompt, system_prompt,
-                                 stream_obj, cancel_event, ollama_base, color, live_output)
+                                 stream_obj, cancel_event, ollama_base, color, live_output,
+                                 screenshot_b64=screenshot_b64)
     except asyncio.CancelledError:
         stream_obj.cancelled = True
     except Exception as e:

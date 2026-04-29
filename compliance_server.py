@@ -35,6 +35,8 @@ from compliance import (
     braille_drift, evaluate_filtration, Verdict, REGULATION_ORDER,
 )
 
+from bbid import get_bbid, bbid_header
+
 PORT = 8420
 
 HTML = r"""<!DOCTYPE html>
@@ -567,6 +569,8 @@ class Handler(BaseHTTPRequestHandler):
             bw = encode_braille_word(decision.constraints)
             bb = encode_braille_binary(decision.constraints)
 
+            _bbid = get_bbid()
+
             result = {
                 "action_id": decision.action_id,
                 "action_type": decision.action_type,
@@ -577,6 +581,11 @@ class Handler(BaseHTTPRequestHandler):
                 "blocking_regulations": decision.blocking_regulations,
                 "mitigations_required": decision.mitigations_required,
                 "justification": decision.justification,
+                "bbid": {
+                    "braille": _bbid.braille,
+                    "agent_id": _bbid.agent_id,
+                    "header": bbid_header(_bbid, bw.word),
+                },
                 "braille": {
                     "word": bw.word,
                     "binary": bb,

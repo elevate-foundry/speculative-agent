@@ -374,9 +374,18 @@ def _write_audit_log(decision: ComplianceDecision) -> None:
     Append-only audit log entry. Each line is a JSON record with a SHA-256
     chain hash linking to the previous entry (SOC II CC6.1 tamper evidence).
     """
+    # BBID: attach agent identity to every audit entry
+    try:
+        from bbid import get_bbid
+        _bbid = get_bbid()
+        _bbid_fields = {"bbid": _bbid.braille, "bbid_agent_id": _bbid.agent_id}
+    except Exception:
+        _bbid_fields = {}
+
     entry = {
         "action_id": decision.action_id,
         "timestamp": decision.timestamp,
+        **_bbid_fields,
         "action_type": decision.action_type,
         "path": decision.path,
         "permitted": decision.permitted,

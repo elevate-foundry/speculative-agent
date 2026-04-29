@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "compliance-lattice"
+version = "0.1.0"
+description = "Tropical compliance lattice with n-dot Braille encoding — compliance-as-a-service for AI agents"
+readme = "SDK.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "Elevate Foundry"}]
+keywords = ["compliance", "braille", "tropical-semiring", "lattice", "ai-safety", "llm", "agents"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Repository = "https://github.com/elevate-foundry/speculative-agent"
+
+[tool.setuptools.packages.find]
+include = ["compliance_sdk*"]
